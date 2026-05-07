@@ -274,43 +274,48 @@ COLOR_BANNER = "#001F5B"
 COLOR_CAJA_CELESTE = "#00AEEF"
 
 
-# ---> EXTRACCIÓN DE TASA BCV (Columnas G y H) <---
+# ---> EXTRACCIÓN DE TASA BCV (PUNTERÍA LÁSER: CUENTAS POR COBRAR) <---
 @st.cache_data
 def extraer_tasa_bcv(archivo):
     try:
-        # Rebobinamos el archivo
+        # Rebobinamos el archivo por seguridad
         archivo.seek(0)
         
-        # Leemos las columnas G y H (buscando en las primeras 15 filas)
-        df_tasa = pd.read_excel(archivo, sheet_name='METRICAS', usecols="G:H", nrows=15, header=None)
-        df_tasa.columns = ['Concepto', 'Valor']
+        # CAMBIO CLAVE: Ahora leemos explícitamente la pestaña 'CUENTAS POR COBRAR'
+        # Escaneamos las primeras 20 filas por si el cliente movió la tabla
+        df_tasa = pd.read_excel(archivo, sheet_name='CUENTAS POR COBRAR', nrows=20, header=None)
         
-        # Buscamos la fila exacta que dice "TASA BCV"
-        fila_tasa = df_tasa[df_tasa['Concepto'].astype(str).str.contains('TASA BCV', case=False, na=False)]
-        
-        if not fila_tasa.empty:
-            val = fila_tasa['Valor'].iloc[0]
-            
-            # Limpiador Latino para convertir "487,12" a un número matemático puro (487.12)
-            if isinstance(val, (int, float)): 
-                return float(val) if val > 0 else 1.0
-            
-            import re
-            v = re.sub(r'[^\d\.,\-]', '', str(val))
-            if '.' in v and ',' in v: v = v.replace('.', '').replace(',', '.')
-            elif ',' in v: v = v.replace(',', '.')
-            
-            tasa = float(v)
-            return tasa if tasa > 0 else 1.0
-    except Exception:
+        # Radar para encontrar la celda que dice "TASA BCV"
+        for fila in range(len(df_tasa)):
+            for col in range(len(df_tasa.columns)):
+                celda_texto = str(df_tasa.iloc[fila, col]).strip().upper()
+                
+                if 'TASA BCV' in celda_texto:
+                    # El monto debe estar en la celda de la derecha (col + 1)
+                    if col + 1 < len(df_tasa.columns):
+                        val = df_tasa.iloc[fila, col + 1]
+                        
+                        # Si es un número puro de Excel
+                        if isinstance(val, (int, float)): 
+                            return float(val) if val > 0 else 1.0
+                        
+                        # Si viene como texto con comas (ej. "493,37")
+                        import re
+                        v = re.sub(r'[^\d\.,\-]', '', str(val))
+                        if '.' in v and ',' in v: v = v.replace('.', '').replace(',', '.')
+                        elif ',' in v: v = v.replace(',', '.')
+                        
+                        tasa = float(v)
+                        return tasa if tasa > 0 else 1.0
+    except Exception as e:
+        # En caso de error, no mostramos nada para no asustar al usuario
         pass
     
-    # Devolvemos 1.0 por defecto para evitar errores catastróficos de "División por Cero" si el Excel falla
+    # Si no la encuentra, devuelve 1.0 para que la app siga viva
     return 1.0 
 
 # Asignamos la variable de la tasa
 tasa_bcv_actual = extraer_tasa_bcv(archivo_excel)
-
 
 
 # --- HTML PEGADO TOTALMENTE A LA IZQUIERDA PARA EVITAR EL ERROR DE TEXTO ---
@@ -444,7 +449,7 @@ with col_kpi1:
 with col_kpi2:
     st.markdown(f"""
     <div class="premium-card">
-        <div class="card-label">Compromisos CxP</div>
+        <div class="card-label">Compromisos CxP (hoy)</div>
         <div class="card-value" style="color: {COLOR_GRIS_TEXTO};">${format_money_ve(abs(compromisos_usd))}</div>
         <div class="card-sub-value">Bs {format_money_ve(abs(compromisos_bs))}</div>
     </div>
@@ -463,7 +468,7 @@ with col_kpi4:
     # Tarjeta Unificada: USD en grande (Bancos), Bs en pequeño (Aliados)
     st.markdown(f"""
     <div class="premium-card" style="border-bottom: 4px solid {COLOR_CAJA_CELESTE};">
-        <div class="card-label">Cobranza Aliados / Bancos</div>
+        <div class="card-label">Cobranza Aliados / Bancos (Hoy)</div>
         <div class="card-value" style="color: {COLOR_TEXTO_PRINCIPAL};">${format_money_ve(abs(cxc_bancos_usd))}</div>
         <div class="card-sub-value">Bs {format_money_ve(abs(val_total_aliados_bs))}</div>
     </div>
@@ -1238,6 +1243,141 @@ else:
 
 
 # ==============================================================================
+# 11. NUEVA SECCIÓN: CRONOGRAMA DE PAGOS DE EQUIPOS
+# ==============================================================================
+st.markdown('<hr style="border: 1px solid #E2E8F0; margin: 40px 0;">', unsafe_allow_html=True)
+st.markdown(f'<h3 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; margin-bottom: 20px;">Cronograma de Pagos y Adquisición de Equipos</h3>', unsafe_allow_html=True)
+
+@st.cache_data
+def cargar_cronograma_equipos(archivo):
+    try:
+        # Rebobinamos y leemos un bloque grande de las columnas C a la J
+        archivo.seek(0)
+        df = pd.read_excel(archivo, sheet_name='METRICAS', usecols="C:J", header=None)
+        df.columns = ['Proveedor', 'Modelo', 'Semana_1', 'Semana_2', 'Semana_3', 'Semana_4', 'Total_Modelo', 'Total_Proveedor']
+        
+        # Limpiador Latino infalible
+        def limpiar_num(val):
+            if pd.isna(val) or str(val).strip() in ['#N/D', '', 'nan', 'None']: return 0.0
+            if isinstance(val, (int, float)): return float(val)
+            import re
+            v = re.sub(r'[^\d\.,\-]', '', str(val))
+            if '.' in v and ',' in v: v = v.replace('.', '').replace(',', '.')
+            elif ',' in v: v = v.replace(',', '.')
+            try: return float(v)
+            except: return 0.0
+
+        # Radar para encontrar dónde empiezan las tablas
+        idx_cant = df[df['Proveedor'].astype(str).str.contains(r'CRONOGRAMA DE PAGOS EQUIPOS \(CANTIDAD\)', case=False, na=False, regex=True)].index
+        idx_usd = df[df['Proveedor'].astype(str).str.contains(r'CRONOGRAMA DE PAGOS EQUIPOS \(USD\)', case=False, na=False, regex=True)].index
+
+        df_cant = pd.DataFrame()
+        df_usd = pd.DataFrame()
+        totales = {'cant': 0.0, 'usd': 0.0}
+
+        columnas_numericas = ['Semana_1', 'Semana_2', 'Semana_3', 'Semana_4', 'Total_Modelo', 'Total_Proveedor']
+
+        # 1. Extraer Tabla de Cantidades
+        if len(idx_cant) > 0:
+            start_cant = idx_cant[0] + 2 # Saltar título y cabeceras
+            df_subset = df.iloc[start_cant:start_cant+15]
+            idx_total = df_subset[df_subset['Proveedor'].astype(str).str.strip().str.upper() == 'TOTAL'].index
+            if len(idx_total) > 0:
+                end_cant = idx_total[0]
+                df_cant = df.iloc[start_cant:end_cant].copy()
+                for col in columnas_numericas:
+                    df_cant[col] = df_cant[col].apply(limpiar_num)
+                totales['cant'] = limpiar_num(df.loc[end_cant, 'Total_Modelo'])
+
+        # 2. Extraer Tabla de USD
+        if len(idx_usd) > 0:
+            start_usd = idx_usd[0] + 2
+            df_subset_usd = df.iloc[start_usd:start_usd+15]
+            idx_total_usd = df_subset_usd[df_subset_usd['Proveedor'].astype(str).str.strip().str.upper() == 'TOTAL'].index
+            if len(idx_total_usd) > 0:
+                end_usd = idx_total_usd[0]
+                df_usd = df.iloc[start_usd:end_usd].copy()
+                for col in columnas_numericas:
+                    df_usd[col] = df_usd[col].apply(limpiar_num)
+                totales['usd'] = limpiar_num(df.loc[end_usd, 'Total_Modelo'])
+
+        return df_cant, df_usd, totales
+    except Exception as e:
+        return pd.DataFrame(), pd.DataFrame(), {'cant': 0.0, 'usd': 0.0}
+
+df_crono_cant, df_crono_usd, totales_crono = cargar_cronograma_equipos(archivo_excel)
+
+if not df_crono_cant.empty and not df_crono_usd.empty:
+    # Tarjetas Resumen (KPIs)
+    col_kpi_eq1, col_kpi_eq2 = st.columns(2)
+    with col_kpi_eq1:
+        st.markdown(f"""
+        <div class="premium-card" style="border-left: 6px solid {COLOR_CAJA_CELESTE}; text-align: center;">
+            <div class="card-label">Total Equipos Programados</div>
+            <div class="card-value" style="color: {COLOR_TEXTO_PRINCIPAL};">{int(totales_crono['cant']):,}</div>
+        </div>
+        """, unsafe_allow_html=True)
+    with col_kpi_eq2:
+        st.markdown(f"""
+        <div class="premium-card" style="border-left: 6px solid #28a745; text-align: center;">
+            <div class="card-label">Total a Pagar (USD)</div>
+            <div class="card-value" style="color: #28a745;">${format_money_ve(totales_crono['usd'])}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # Pestañas Interactivas
+    tab_cant, tab_usd = st.tabs(["📦 Unidades Físicas (Cantidad)", "💵 Cronograma Financiero (USD)"])
+
+    # Función para generar la tabla HTML con estilo
+    def generar_tabla_crono(df, es_usd=False):
+        prefijo = "$" if es_usd else ""
+        color_texto = "#28a745" if es_usd else COLOR_TEXTO_PRINCIPAL
+        
+        html = f"""
+        <div class="premium-card" style="padding: 0; overflow: hidden;">
+        <table style='width:100%; border-collapse: collapse; font-family: "Montserrat", sans-serif; font-size: 0.85rem;'>
+            <thead>
+                <tr style="background-color: {COLOR_TEXTO_PRINCIPAL}; color: white;">
+                    <th style='padding: 12px; text-align: left;'>Proveedor</th>
+                    <th style='padding: 12px; text-align: left;'>Modelo</th>
+                    <th style='padding: 12px; text-align: center;'>1era Sem</th>
+                    <th style='padding: 12px; text-align: center;'>2da Sem</th>
+                    <th style='padding: 12px; text-align: center;'>3era Sem</th>
+                    <th style='padding: 12px; text-align: center;'>4ta Sem</th>
+                    <th style='padding: 12px; text-align: right; background-color: rgba(255,255,255,0.1);'>Total Modelo</th>
+                </tr>
+            </thead>
+            <tbody>
+        """
+        for _, row in df.iterrows():
+            def fmt(val):
+                if val == 0: return "-"
+                return f"{prefijo}{format_money_ve(val)}" if es_usd else f"{int(val):,}"
+
+            html += f"""
+            <tr style="border-bottom: 1px solid {COLOR_GRIS_CLARO};">
+                <td style='padding: 10px 12px; color: {COLOR_GRIS_TEXTO}; font-weight: 600;'>{str(row['Proveedor']).replace('nan', '')}</td>
+                <td style='padding: 10px 12px; color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 700;'>{str(row['Modelo']).replace('nan', '')}</td>
+                <td style='padding: 10px 12px; text-align: center; color: {COLOR_GRIS_TEXTO};'>{fmt(row['Semana_1'])}</td>
+                <td style='padding: 10px 12px; text-align: center; color: {COLOR_GRIS_TEXTO};'>{fmt(row['Semana_2'])}</td>
+                <td style='padding: 10px 12px; text-align: center; color: {COLOR_GRIS_TEXTO};'>{fmt(row['Semana_3'])}</td>
+                <td style='padding: 10px 12px; text-align: center; color: {COLOR_GRIS_TEXTO};'>{fmt(row['Semana_4'])}</td>
+                <td style='padding: 10px 12px; text-align: right; color: {color_texto}; font-weight: 800; background-color: #F8FAFC;'>{fmt(row['Total_Modelo'])}</td>
+            </tr>
+            """
+        html += "</tbody></table></div>"
+        return html
+
+    with tab_cant:
+        st.markdown(generar_tabla_crono(df_crono_cant, es_usd=False).replace('\n', ''), unsafe_allow_html=True)
+    with tab_usd:
+        st.markdown(generar_tabla_crono(df_crono_usd, es_usd=True).replace('\n', ''), unsafe_allow_html=True)
+else:
+    st.info("No se encontró el cronograma de equipos en el archivo actual.")
+
+
+
+# ==============================================================================
 # SECCIÓN FINAL: BOTONES DE EXPORTACIÓN (Sidebar) - VISTA COMPLETA
 # ==============================================================================
 with st.sidebar:
@@ -1262,32 +1402,47 @@ with st.sidebar:
         mime="application/vnd.ms-excel"
     )
 
-    # --- 2. GENERADOR DE VISTA HTML COMPLETA ---
+    # --- 2. GENERADOR DE VISTA HTML COMPLETA (ACTUALIZADO CON EQUIPOS) ---
     
-    # Funciones auxiliares para construir tablas HTML dinámicamente (AHORA BIMONETARIAS)
     def generar_filas_html(df, col_concepto, col_monto, col_pct=None):
         filas = ""
         if df is not None and not df.empty:
             for _, row in df.iterrows():
                 mnt_bs = row[col_monto]
-                # Calculamos los USD al vuelo con la tasa global
                 mnt_usd = mnt_bs / tasa_bcv_actual if 'tasa_bcv_actual' in globals() and tasa_bcv_actual > 0 else 0.0
-                
                 filas += f"<tr><td style='padding: 8px; border-bottom: 1px solid #E2E8F0; font-size: 13px;'>{row[col_concepto]}</td>"
                 filas += f"<td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 13px; color: #001F5B;'>{format_money_ve(mnt_bs)}</td>"
-                # Agregamos la nueva celda en USD (color celeste para destacar)
                 filas += f"<td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 13px; color: #00AEEF;'>${format_money_ve(mnt_usd)}</td>"
-                
                 if col_pct:
-                    # Formateo condicional para que CxC y CxP mantengan su diseño
-                    decimales = ".2f" if col_concepto == 'Concepto' and "Simcard" in str(row[col_concepto]) else ".1f"
                     filas += f"<td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 13px; color: #00AEEF;'>{row[col_pct]:.1f}%</td>"
                 filas += "</tr>"
         return filas
 
+    # Función para filas de equipos (ahora más compactas para el reporte)
+    def generar_filas_crono_html(df, es_usd=False):
+        filas = ""
+        prefijo = "$" if es_usd else ""
+        if df is not None and not df.empty:
+            for _, row in df.iterrows():
+                def f(v): return f"{prefijo}{format_money_ve(v)}" if es_usd else f"{int(v):,}"
+                filas += f"<tr>"
+                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; font-size: 10px;'>{row['Proveedor']}</td>"
+                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; font-size: 10px; font-weight: bold;'>{row['Modelo']}</td>"
+                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 10px;'>{f(row['Semana_1'])}</td>"
+                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 10px;'>{f(row['Semana_2'])}</td>"
+                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 10px;'>{f(row['Semana_3'])}</td>"
+                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 10px;'>{f(row['Semana_4'])}</td>"
+                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 10px; background: #F8FAFC;'>{f(row['Total_Modelo'])}</td>"
+                filas += f"</tr>"
+        return filas
+    
     html_cxp = generar_filas_html(df_comp_tabla, 'Concepto', 'Monto', 'Porcentaje') if 'df_comp_tabla' in locals() else ""
     html_cxc = generar_filas_html(df_cobrar_tabla, 'Concepto', 'Monto', 'Porcentaje') if 'df_cobrar_tabla' in locals() else ""
     html_ger = generar_filas_html(df_gerencia, 'Gerencia', 'Monto', 'Porcentaje') if 'df_gerencia' in locals() else ""
+    html_crono_cant = generar_filas_crono_html(df_crono_cant, False) if 'df_crono_cant' in locals() else ""
+    html_crono_usd = generar_filas_crono_html(df_crono_usd, True) if 'df_crono_usd' in locals() else ""
+    
+    
     
     html_proy = ""
     if 'df_proyeccion' in locals() and not df_proyeccion.empty:
@@ -1309,7 +1464,7 @@ with st.sidebar:
             .container {{ max-width: 1000px; margin: auto; background: white; padding: 40px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.05); }}
             .header {{ background-color: #001F5B; padding: 30px; border-radius: 10px; color: white; display: flex; justify-content: space-between; align-items: center; margin-bottom: 30px; }}
             h1 {{ margin: 0; font-size: 24px; font-weight: 800; }}
-            h2 {{ font-size: 18px; color: #001F5B; border-bottom: 2px solid #FFB81C; padding-bottom: 10px; margin-top: 40px; }}
+            h2 {{ font-size: 18px; color: #001F5B; border-bottom: 2px solid #FFB81C; padding-bottom: 10px; margin-top: 40px; width: 100%; }}
             .date {{ color: #FFB81C; font-weight: 700; }}
             
             .kpi-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 30px; }}
@@ -1321,7 +1476,10 @@ with st.sidebar:
             table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
             th {{ background-color: #001F5B; color: white; padding: 10px; text-align: left; font-size: 12px; text-transform: uppercase; }}
             
-            .two-columns {{ display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }}
+            /* LA MAGIA SUCEDE AQUI: Obligamos a que cada columna sea 50% exacto */
+            .two-columns {{ display: flex; width: 100%; gap: 30px; margin-top: 20px; }}
+            .two-columns > div {{ width: 50%; box-sizing: border-box; }}
+            
             .pill-container {{ display: flex; gap: 15px; margin-bottom: 20px; }}
             .pill {{ background: #001F5B; color: white; padding: 10px 20px; border-radius: 8px; font-weight: 700; font-size: 13px; }}
         </style>
@@ -1403,7 +1561,7 @@ with st.sidebar:
                 </div>
             </div>
 
-            <div class="two-columns" style="margin-top: 20px;">
+            <div class="two-columns">
                 <div>
                     <h2>5. Proyección de Disponibilidad</h2>
                     <table>
@@ -1416,6 +1574,25 @@ with st.sidebar:
                     <table>
                         <tr><th>Gerencia</th><th style="text-align:right;">Monto (Bs)</th><th style="text-align:right;">Monto (USD)</th><th style="text-align:right;">%</th></tr>
                         {html_ger}
+                    </table>
+                </div>
+            </div>
+
+            <div class="two-columns">
+                <div>
+                    <h2>7. Cronograma Adquisición</h2>
+                    <p style="font-size: 11px; color: #64748B; margin-bottom: 5px;">Unidades físicas programadas.</p>
+                    <table>
+                        <tr><th>Prov.</th><th>Modelo</th><th style="text-align:center;">S1</th><th style="text-align:center;">S2</th><th style="text-align:center;">S3</th><th style="text-align:center;">S4</th><th style="text-align:right;">Total</th></tr>
+                        {html_crono_cant}
+                    </table>
+                </div>
+                <div>
+                    <h2>8. Cronograma USD</h2>
+                    <p style="font-size: 11px; color: #64748B; margin-bottom: 5px;">Desembolsos en divisas.</p>
+                    <table>
+                        <tr><th>Prov.</th><th>Modelo</th><th style="text-align:center;">S1</th><th style="text-align:center;">S2</th><th style="text-align:center;">S3</th><th style="text-align:center;">S4</th><th style="text-align:right;">Total</th></tr>
+                        {html_crono_usd}
                     </table>
                 </div>
             </div>
@@ -1436,3 +1613,4 @@ with st.sidebar:
         help="Descarga un documento estático con todas las tablas y cifras calculadas en el dashboard."
     )
     
+
