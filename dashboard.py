@@ -409,28 +409,55 @@ compromisos_bs, compromisos_usd = cargar_total_compromisos_cxp_real(archivo_exce
 apartados_bs = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Apartados para Compromisos Operativo', case=False, na=False)]['Bs'].sum()
 apartados_usd = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Apartados para Compromisos Operativo', case=False, na=False)]['USD'].sum()
 
-# 2. Extracción de "Cobranza Bancos" (USD)
-cxc_bancos_usd = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Cuentas por Cobrar Aliados', case=False, na=False)]['USD'].sum()
-
-# 3. Función para buscar el "Total" del cuadro verde de Aliados (Bs)
+# ==============================================================================
+# 2 y 3. EXTRACCIÓN EXACTA DE "COBRANZA ALIADOS / BANCOS" (Bs y USD Reales)
+# ==============================================================================
 @st.cache_data
-def cargar_total_cobranza_aliados(archivo):
+def cargar_cobranza_aliados_bancos_real(archivo):
     try:
-        df = pd.read_excel(archivo, sheet_name='METRICAS', usecols="F:G", header=None)
-        df.columns = ['Concepto', 'Monto']
-        idx_aliados = df[df['Concepto'].astype(str).str.strip() == 'Aliados'].index
+        archivo.seek(0)
+        # Leemos desde la columna F hasta la J (usecols="F:J")
+        df = pd.read_excel(archivo, sheet_name='METRICAS', usecols="F:J", header=None)
+        df.columns = ['Concepto', 'Bs', 'Col_H', 'Col_I', 'USD']
+        
+        # Limpiador infalible para purificar los montos
+        def limpiar_monto(val):
+            if pd.isna(val) or str(val).strip() in ['#N/D', 'nan', '', 'None', '-']: return 0.0
+            if isinstance(val, (int, float)): return float(val)
+            import re
+            v = re.sub(r'[^\d\.,\-]', '', str(val))
+            if '.' in v and ',' in v: v = v.replace('.', '').replace(',', '.')
+            elif ',' in v: v = v.replace(',', '.')
+            try: return float(v)
+            except: return 0.0
+
+        # Puntería láser directa a la fila 75 (índice 74 en Python)
+        if len(df) > 74:
+            concepto_75 = str(df.loc[74, 'Concepto']).strip().upper()
+            if 'TOTAL' in concepto_75:
+                bs_val = limpiar_monto(df.loc[74, 'Bs'])
+                usd_val = limpiar_monto(df.loc[74, 'USD']) # Extrae directo de la celda J75
+                if bs_val > 0 or usd_val > 0:
+                    return abs(bs_val), abs(usd_val)
+
+        # Radar de respaldo por si se insertan o mueven filas
+        idx_aliados = df[df['Concepto'].astype(str).str.strip().str.lower() == 'aliados'].index
         if len(idx_aliados) > 0:
             start_idx = idx_aliados[0]
             df_subset = df.iloc[start_idx:start_idx+10]
-            idx_total = df_subset[df_subset['Concepto'].astype(str).str.strip() == 'Total'].index
+            idx_total = df_subset[df_subset['Concepto'].astype(str).str.strip().str.lower() == 'total'].index
             if len(idx_total) > 0:
-                val = df.loc[idx_total[0], 'Monto']
-                return pd.to_numeric(str(val).replace('$', '').replace(',', '.').replace(' ', '').replace('-', ''), errors='coerce')
-    except:
+                bs_val = limpiar_monto(df.loc[idx_total[0], 'Bs'])
+                usd_val = limpiar_monto(df.loc[idx_total[0], 'USD'])
+                return abs(bs_val), abs(usd_val)
+                
+    except Exception:
         pass
-    return 0.0
+    return 0.0, 0.0
 
-val_total_aliados_bs = cargar_total_cobranza_aliados(archivo_excel)
+# Asignamos las variables sobreescribiendo las anteriores
+val_total_aliados_bs, cxc_bancos_usd = cargar_cobranza_aliados_bancos_real(archivo_excel)
+
 
 # ==============================================================================
 # FILA 1: TARJETAS KPI (4 COLUMNAS UNIFICADAS)
