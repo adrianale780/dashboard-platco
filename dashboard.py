@@ -1405,7 +1405,12 @@ def cargar_cronograma_equipos(archivo):
                         df_cant.loc[df_cant['Prov_Clean'] == prov_name, 'Total_Proveedor'] = max_tot
                 
                 totales['cant_est'] = df_cant.loc[end_cant, 'Total_Modelo']
-                totales['cant_real'] = df_cant.loc[end_cant, 'Total_Proveedor']
+                
+                # CORRECCIÓN EXCLUSIVA: Sumamos únicamente las columnas reales de la fila TOTAL
+                totales['cant_real'] = (df_cant.loc[end_cant, 'S1_Real'] + 
+                                        df_cant.loc[end_cant, 'S2_Real'] + 
+                                        df_cant.loc[end_cant, 'S3_Real'] + 
+                                        df_cant.loc[end_cant, 'S4_Real'])
 
         # 2. Extraer Tabla de USD
         if len(idx_usd) > 0:
@@ -1425,7 +1430,12 @@ def cargar_cronograma_equipos(archivo):
                         df_usd.loc[df_usd['Prov_Clean'] == prov_name, 'Total_Proveedor'] = max_tot
                 
                 totales['usd_est'] = df_usd.loc[end_usd, 'Total_Modelo']
-                totales['usd_real'] = df_usd.loc[end_usd, 'Total_Proveedor']
+                
+                # CORRECCIÓN EXCLUSIVA: Sumamos únicamente las columnas reales de la fila TOTAL
+                totales['usd_real'] = (df_usd.loc[end_usd, 'S1_Real'] + 
+                                       df_usd.loc[end_usd, 'S2_Real'] + 
+                                       df_usd.loc[end_usd, 'S3_Real'] + 
+                                       df_usd.loc[end_usd, 'S4_Real'])
 
         return df_cant, df_usd, totales
     except Exception:
@@ -1457,7 +1467,7 @@ if not df_crono_cant.empty and not df_crono_usd.empty:
     def generar_tabla_crono(df, es_usd=False):
         prefijo = "$" if es_usd else ""
         
-        # Estructura inicial sin sangrías
+        # Mantenemos la estructura plana sin sangrías para evitar bloques de código Markdown
         html = f"""<div class="premium-card" style="padding: 0; overflow: hidden;">
 <table style='width:100%; border-collapse: collapse; font-family: "Montserrat", sans-serif; font-size: 0.82rem;'>
 <thead>
@@ -1480,7 +1490,6 @@ if not df_crono_cant.empty and not df_crono_usd.empty:
 </thead>
 <tbody>"""
         
-        # Mapeo preciso de pertenencia de marca para calcular el rowspan exacto
         marcas = []
         marca_actual = ""
         for idx, row in df.iterrows():
@@ -1515,7 +1524,6 @@ if not df_crono_cant.empty and not df_crono_usd.empty:
             prov_disp = str(row['Proveedor']).replace('nan', '').strip()
             mod_disp = str(row['Modelo']).replace('nan', '').strip()
             
-            # Generamos las celdas estándar de la izquierda
             filas_td = f"""<td style='padding: 8px 10px; border-right: 1px solid {COLOR_GRIS_CLARO}; font-weight: 700; color: {COLOR_TEXTO_PRINCIPAL if not es_total_row else "white"};'>{prov_disp}</td>
 <td style='padding: 8px 10px; border-right: 1px solid {COLOR_GRIS_CLARO}; color: {COLOR_GRIS_TEXTO if not es_total_row else "white"}; font-weight: 600;'>{mod_disp}</td>
 <td style='padding: 8px 5px; text-align: center;'>{fmt(row['S1_Est'])}</td>
@@ -1528,14 +1536,13 @@ if not df_crono_cant.empty and not df_crono_usd.empty:
 <td style='padding: 8px 5px; text-align: center; border-right: 1px solid {COLOR_GRIS_CLARO}; background-color: rgba(0, 174, 239, 0.05); font-weight: 600;'>{fmt(row['S4_Real'])}</td>
 <td style='padding: 8px 10px; text-align: right; font-weight: 800; background-color: rgba(0,0,0,0.03);'>{fmt(row['Total_Modelo'])}</td>"""
 
-            # LÓGICA ROWSPAN: Imprime el Total por Proveedor solo en la primera fila de la marca y la estira hacia abajo
             if es_total_row:
                 td_n = f"<td style='padding: 8px 10px; text-align: right; font-weight: 800; background-color: rgba(0,0,0,0.06); color: white;'>{fmt(row['Total_Proveedor'])}</td>"
             elif es_primera_fila_marca:
                 rspan = filas_por_marca[marca]
                 td_n = f"<td rowspan='{rspan}' style='padding: 8px 10px; text-align: right; vertical-align: middle; font-weight: 800; background-color: rgba(0,0,0,0.06); color: {COLOR_AMARILLO}; border-bottom: 1px solid {COLOR_GRIS_CLARO};'>{fmt(row['Total_Proveedor'])}</td>"
             else:
-                td_n = "" # Suprime la celda para permitir la expansión vertical nativa
+                td_n = "" 
 
             html += f"\n<tr style='border-bottom: 1px solid {COLOR_GRIS_CLARO}; {bg_row}'>{filas_td}{td_n}</tr>"
 
@@ -1544,7 +1551,6 @@ if not df_crono_cant.empty and not df_crono_usd.empty:
 
     with tab_cant: st.markdown(generar_tabla_crono(df_crono_cant, es_usd=False), unsafe_allow_html=True)
     with tab_usd: st.markdown(generar_tabla_crono(df_crono_usd, es_usd=True), unsafe_allow_html=True)
-
 
 # ==============================================================================
 # SECCIÓN FINAL: BOTONES DE EXPORTACIÓN (Sidebar) - VISTA COMPLETA
