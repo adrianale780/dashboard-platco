@@ -1,6 +1,9 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import os
+import re
+import io
 
 
 # ==============================================================================
@@ -23,17 +26,14 @@ COLOR_GRIS_TEXTO = "#6C757D"      # Gris para subtítulos
 COLOR_GRIS_CLARO = "#E2E8F0"      # Gris para líneas
 
 # ==============================================================================
-# CARGA DINÁMICA DE ARCHIVO (ZONA DE CARGA)
+# CARGA DINÁMICA DE ARCHIVO (CARGADOR ESTÁNDAR)
 # ==============================================================================
 with st.sidebar:
     st.markdown('<h3 style="color: #001F5B; font-weight: 800; margin-bottom: 15px;">📂 Cargar Datos</h3>', unsafe_allow_html=True)
-    
-    archivo_excel = st.file_uploader(
-        "Sube el archivo de Métricas de hoy:", 
-        type=['xlsx', 'xls']
-    )
+    archivo_excel = st.file_uploader("Sube el archivo de Métricas de hoy:", type=['xlsx', 'xls'])
     st.markdown('<hr style="border: 1px solid #E2E8F0; margin: 20px 0;">', unsafe_allow_html=True)
 
+# Si no hay archivo subido, mostramos la pantalla de bienvenida y detenemos el código
 if archivo_excel is None:
     st.markdown(f"""
     <div style="text-align: center; padding: 50px; background-color: white; border-radius: 12px; border: 2px dashed #CBD5E1; margin-top: 50px;">
@@ -41,7 +41,7 @@ if archivo_excel is None:
         <p style="color: #64748B; font-family: 'Montserrat', sans-serif; font-size: 1.1rem;">Por favor, sube el archivo Excel de cierre diario en el menú de la izquierda para comenzar.</p>
     </div>
     """, unsafe_allow_html=True)
-    st.stop() # Detiene el código hasta que se suba el archivo
+    st.stop()
 
 # ==============================================================================
 # 2. INYECCIÓN DE CSS (FUENTE MONTSERRAT Y COLORES)
@@ -1144,55 +1144,155 @@ else:
     st.info("No hay datos cargados para este flujo operativo.")
 
 # ==============================================================================
-# 7. SECCIÓN DINÁMICA: DESEMBOLSO POR GERENCIA (SOLO EGRESOS)
+# 6.5. SECCIÓN DINÁMICA: PRINCIPALES INGRESOS Y EGRESOS (COMPATIBLE PLOTLY 5.18)
+# ==============================================================================
+st.markdown('<hr style="border: 1px solid #E2E8F0; margin: 40px 0;">', unsafe_allow_html=True)
+st.markdown(f'<h3 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; margin-bottom: 20px;">Principales Ingresos y Egresos</h3>', unsafe_allow_html=True)
+
+@st.cache_data
+def cargar_ingresos_egresos_coordenadas_exactas(archivo):
+    try:
+        archivo.seek(0)
+        # 1. Extracción de Principales Ingresos (V:X, iniciando en la fila 23 del Excel -> skiprows=22)
+        df_ing = pd.read_excel(archivo, sheet_name='METRICAS', skiprows=22, nrows=10, usecols="V:X", header=None)
+        df_ing.columns = ['Concepto', 'Monto', 'Pct']
+        
+        # 2. Extracción de Principales Egresos (Z:AB, iniciando en la fila 23 del Excel -> skiprows=22)
+        df_egr = pd.read_excel(archivo, sheet_name='METRICAS', skiprows=22, nrows=10, usecols="Z:AB", header=None)
+        df_egr.columns = ['Concepto', 'Monto', 'Pct']
+        
+        def limpiar_tabla(df):
+            df = df.dropna(subset=['Concepto']).copy()
+            df = df[df['Concepto'].astype(str).str.strip() != '']
+            df = df[~df['Concepto'].astype(str).str.contains('total|suma', case=False, na=False)]
+            
+            def purificar_num(val):
+                if pd.isna(val) or str(val).strip() in ['#N/D', 'nan', '', '-', 'None']: return 0.0
+                if isinstance(val, (int, float)): return float(val)
+                import re
+                v = re.sub(r'[^\d\.,\-]', '', str(val))
+                if '.' in v and ',' in v: v = v.replace('.', '').replace(',', '.')
+                elif ',' in v: v = v.replace(',', '.')
+                try: return float(v)
+                except: return 0.0
+                
+            df['Monto'] = df['Monto'].apply(purificar_num).abs()
+            return df.reset_index(drop=True)
+
+        return limpiar_tabla(df_ing), limpiar_tabla(df_egr)
+    except Exception:
+        return pd.DataFrame(), pd.DataFrame()
+
+df_princ_ing, df_princ_egr = cargar_ingresos_egresos_coordenadas_exactas(archivo_excel)
+
+if not df_princ_ing.empty or not df_princ_egr.empty:
+    col_gr_ing, col_gr_egr = st.columns(2)
+    
+    # --- GRÁFICO 1: PRINCIPALES INGRESOS (Barras Verticales - Texto Envuelto) ---
+    with col_gr_ing:
+        st.markdown('<div class="premium-card" style="padding: 20px;">', unsafe_allow_html=True)
+        if not df_princ_ing.empty:
+            import textwrap
+            df_princ_ing['Concepto_Envuelto'] = df_princ_ing['Concepto'].apply(
+                lambda x: '<br>'.join(textwrap.wrap(str(x), width=14))
+            )
+            
+            fig_ing = px.bar(
+                df_princ_ing,
+                x='Concepto_Envuelto',
+                y='Monto',
+                text_auto='.2s'
+            )
+            fig_ing.update_traces(
+                marker_color=COLOR_TEXTO_PRINCIPAL,
+                textposition='outside',
+                textfont=dict(family="Montserrat", size=11, color=COLOR_TEXTO_PRINCIPAL),
+                cliponaxis=False
+            )
+            fig_ing.update_layout(
+                # ELIMINADO weight="bold" para asegurar compatibilidad perfecta con plotly 5.18.0
+                title=dict(text="Principales Ingresos", font=dict(size=16, color=COLOR_TEXTO_PRINCIPAL, family="Montserrat")),
+                font=dict(family="Montserrat, sans-serif", color=COLOR_GRIS_TEXTO),
+                xaxis=dict(title="", showgrid=False, tickfont=dict(size=10), tickangle=0),
+                yaxis=dict(title="", showgrid=True, gridcolor=COLOR_GRIS_CLARO, zeroline=True, zerolinecolor=COLOR_GRIS_CLARO),
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                margin=dict(l=0, r=0, t=40, b=0)
+            )
+            ymax_ing = df_princ_ing['Monto'].max() * 1.15 if df_princ_ing['Monto'].max() > 0 else 1.0
+            fig_ing.update_yaxes(range=[0, ymax_ing])
+                
+            st.plotly_chart(fig_ing, use_container_width=True, config={'displayModeBar': False})
+        else:
+            st.info("No se encontraron registros en el rango V23:X29.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # --- GRÁFICO 2: PRINCIPALES EGRESOS (Barras Horizontales) ---
+    with col_gr_egr:
+        st.markdown('<div class="premium-card" style="padding: 20px;">', unsafe_allow_html=True)
+        if not df_princ_egr.empty:
+            fig_egr = px.bar(
+                df_princ_egr,
+                x='Monto',
+                y='Concepto',
+                orientation='h',
+                text_auto='.2s'
+            )
+            fig_egr.update_traces(
+                marker_color=COLOR_TEXTO_PRINCIPAL,
+                textposition='outside',
+                textfont=dict(family="Montserrat", size=11, color=COLOR_TEXTO_PRINCIPAL),
+                cliponaxis=False
+            )
+            fig_egr.update_layout(
+                # ELIMINADO weight="bold" para asegurar compatibilidad perfecta con plotly 5.18.0
+                title=dict(text="Principales Egresos", font=dict(size=16, color=COLOR_TEXTO_PRINCIPAL, family="Montserrat")),
+                font=dict(family="Montserrat, sans-serif", color=COLOR_GRIS_TEXTO),
+                xaxis=dict(title="", showgrid=True, gridcolor=COLOR_GRIS_CLARO, zeroline=True, zerolinecolor=COLOR_GRIS_CLARO),
+                yaxis=dict(title="", showgrid=False, autorange="reversed", tickfont=dict(size=10)), 
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                margin=dict(l=0, r=0, t=40, b=0)
+            )
+            xmax_egr = df_princ_egr['Monto'].max() * 1.20 if df_princ_egr['Monto'].max() > 0 else 1.0
+            fig_egr.update_xaxes(range=[0, xmax_egr])
+                
+            st.plotly_chart(fig_egr, use_container_width=True, config={'displayModeBar': False})
+        else:
+            st.info("No se encontraron registros en el rango Z23:AB30.")
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# ==============================================================================
+# 7. SECCIÓN DINÁMICA: DESEMBOLSO POR GERENCIA (COMPATIBLE PLOTLY 5.18)
 # ==============================================================================
 st.markdown('<hr style="border: 1px solid #E2E8F0; margin: 40px 0;">', unsafe_allow_html=True)
 st.markdown(f'<h3 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; margin-bottom: 20px;">Desembolso por Gerencia</h3>', unsafe_allow_html=True)
 
-# 7.1 CARGA Y LIMPIEZA DE DATOS (COORDENADAS C:D)
 @st.cache_data
 def cargar_desembolsos_gerencia(archivo, skip_rows):
     try:
-        # Aumentamos nrows a 20 para asegurar que lea todas las nuevas gerencias
         df = pd.read_excel(archivo, sheet_name='METRICAS', skiprows=skip_rows, nrows=20, usecols="C:D", header=None)
         df.columns = ['Gerencia', 'Monto']
-        
         df = df.dropna(how='all')
-        
-        # Filtramos todos los encabezados y totales para dejar solo las gerencias puras
         palabras_basura = ['Total general', 'Etiquetas de fila', 'Suma de Desembolso Bs', 'Desembolsos por Gerencia', 'ITEMS', 'CUENTA', 'MES DE LA OPERATIVIDAD']
         df = df[~df['Gerencia'].astype(str).str.strip().isin(palabras_basura)]
         df = df[~df['Gerencia'].astype(str).str.contains('Total general', case=False, na=False)]
-
-        # Limpiamos los montos (convertimos los guiones/negativos a absolutos)
         df['Monto'] = pd.to_numeric(df['Monto'].astype(str).str.replace('$', '', regex=False).str.replace(',', '.', regex=False).str.replace(' ', '', regex=False).str.replace('-', '', regex=False), errors='coerce').fillna(0.0).abs()
-        
-        # Quitamos gerencias con monto 0 o nombres vacíos
         df = df[(df['Monto'] > 0) & (df['Gerencia'].astype(str).str.strip() != '') & (df['Gerencia'].astype(str).str.strip() != 'nan')].reset_index(drop=True)
-        
-        # Calculamos el % de participación real exacto
         total_real = df['Monto'].sum()
         df['Porcentaje'] = (df['Monto'] / total_real) * 100 if total_real > 0 else 0
-        
-        # Ordenamos de mayor a menor
         df = df.sort_values(by='Monto', ascending=False).reset_index(drop=True)
-        
         return df, total_real
-    except Exception as e:
+    except Exception:
         return pd.DataFrame(columns=['Gerencia', 'Monto', 'Porcentaje']), 0.0
 
-# ⚠️ NUEVA COORDENADA: skip_rows=106 para que empiece a leer exactamente en la fila 107
 df_gerencia, total_desembolso = cargar_desembolsos_gerencia(archivo_excel, skip_rows=106) 
 
-# 7.2 DISEÑO UI: TABLA, GRÁFICO DE ANILLO Y CONSEJO EJECUTIVO
 if not df_gerencia.empty:
     col_ger_tabla, col_ger_grafico = st.columns([1.5, 2.5])
-    
     with col_ger_tabla:
         st.markdown('<div class="premium-card" style="padding: 20px; margin-bottom: 20px;">', unsafe_allow_html=True)
         st.markdown(f'<h4 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 700; margin-top: 0; margin-bottom: 15px;">Detalle de Distribución</h4>', unsafe_allow_html=True)
-        
-        # Agregamos el encabezado a la tabla HTML para identificar las columnas
         html_tabla_ger = f"""
         <table style='width:100%; border-collapse: collapse; font-family: "Montserrat", sans-serif; font-size: 0.85rem;'>
             <thead>
@@ -1206,31 +1306,19 @@ if not df_gerencia.empty:
             <tbody>
         """
         for _, row in df_gerencia.iterrows():
-            ger = str(row['Gerencia']).strip()
-            mnt_bs = format_money_ve(row['Monto'])
-            
-            # --- NUEVO: Calculamos los Dólares usando la tasa ---
-            mnt_usd_val = row['Monto'] / tasa_bcv_actual
-            mnt_usd = f"${format_money_ve(mnt_usd_val)}"
-            # ----------------------------------------------------
-            
-            pct = f"{row['Porcentaje']:.1f}%"
-            
-            html_tabla_ger += f"<tr><td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; color: {COLOR_GRIS_TEXTO}; font-weight: 600;'>{ger}</td>"
-            html_tabla_ger += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: right; color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 700;'>{mnt_bs}</td>"
-            html_tabla_ger += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: right; color: #26BE50; font-weight: 700;'>{mnt_usd}</td>" # Verde por ser un desembolso
-            html_tabla_ger += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: right; color: {COLOR_CAJA_CELESTE}; font-weight: 800;'>{pct}</td></tr>"
+            mnt_usd = f"${format_money_ve(row['Monto'] / tasa_bcv_actual)}"
+            html_tabla_ger += f"<tr><td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; color: {COLOR_GRIS_TEXTO}; font-weight: 600;'>{str(row['Gerencia']).strip()}</td>"
+            html_tabla_ger += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: right; color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 700;'>{format_money_ve(row['Monto'])}</td>"
+            html_tabla_ger += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: right; color: #26BE50; font-weight: 700;'>{mnt_usd}</td>" 
+            html_tabla_ger += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: right; color: {COLOR_CAJA_CELESTE}; font-weight: 800;'>{row['Porcentaje']:.1f}%</td></tr>"
         html_tabla_ger += "</tbody></table></div>"
         st.markdown(html_tabla_ger, unsafe_allow_html=True)
-        
-        gerencia_top = df_gerencia.iloc[0]['Gerencia']
-        pct_top = df_gerencia.iloc[0]['Porcentaje']
         
         st.markdown(f"""
         <div style="background-color: #F8FAFC; border-left: 4px solid {COLOR_AMARILLO}; padding: 15px; border-radius: 0 8px 8px 0; font-family: 'Montserrat', sans-serif;">
             <div style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; font-size: 0.85rem; text-transform: uppercase; margin-bottom: 5px;">🎯 Insight de Gestión</div>
             <div style="color: {COLOR_GRIS_TEXTO}; font-size: 0.85rem; line-height: 1.5;">
-                La gerencia de <b>{gerencia_top}</b> concentra el <b>{pct_top:.1f}%</b> del desembolso total del mes ({format_money_ve(total_desembolso)} Bs). 
+                La gerencia de <b>{df_gerencia.iloc[0]['Gerencia']}</b> concentra el <b>{df_gerencia.iloc[0]['Porcentaje']:.1f}%</b> del desembolso total del mes ({format_money_ve(total_desembolso)} Bs). 
                 Se sugiere revisar sus partidas principales para identificar oportunidades de eficiencia.
             </div>
         </div>
@@ -1238,28 +1326,16 @@ if not df_gerencia.empty:
 
     with col_ger_grafico:
         st.markdown('<div class="premium-card" style="height: 100%; padding: 20px; display: flex; align-items: center; justify-content: center;">', unsafe_allow_html=True)
+        fig_ger = px.pie(df_gerencia, names='Gerencia', values='Monto', hole=0.65, color_discrete_sequence=[COLOR_TEXTO_PRINCIPAL, COLOR_CAJA_CELESTE, COLOR_AMARILLO, "#64748B", "#94A3B8", "#CBD5E1"])
+        fig_ger.update_traces(textposition='outside', textinfo='percent+label', textfont=dict(family="Montserrat", size=10, color=COLOR_TEXTO_PRINCIPAL), hovertemplate="<b>%{label}</b><br>Monto: %{value:,.2f} Bs<br>Participación: %{percent}<extra></extra>")
         
-        fig_ger = px.pie(
-            df_gerencia, 
-            names='Gerencia', 
-            values='Monto',
-            hole=0.65, 
-            color_discrete_sequence=[COLOR_TEXTO_PRINCIPAL, COLOR_CAJA_CELESTE, COLOR_AMARILLO, "#64748B", "#94A3B8", "#CBD5E1"]
-        )
-        
-        fig_ger.update_traces(
-            textposition='outside', 
-            textinfo='percent+label',
-            textfont=dict(family="Montserrat", size=10, color=COLOR_TEXTO_PRINCIPAL),
-            hovertemplate="<b>%{label}</b><br>Monto: %{value:,.2f} Bs<br>Participación: %{percent}<extra></extra>"
-        )
-        
+        # ELIMINADO font_weight="bold" de la anotación central para evitar el ValueError en Plotly 5.18.0
         fig_ger.update_layout(
             showlegend=False, 
-            margin=dict(l=20, r=20, t=20, b=20),
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            annotations=[dict(text='Desembolso<br>Total', x=0.5, y=0.5, font_size=14, font_family="Montserrat", font_weight="bold", showarrow=False, font_color=COLOR_TEXTO_PRINCIPAL)]
+            margin=dict(l=20, r=20, t=20, b=20), 
+            plot_bgcolor='rgba(0,0,0,0)', 
+            paper_bgcolor='rgba(0,0,0,0)', 
+            annotations=[dict(text='Desembolso<br>Total', x=0.5, y=0.5, font_size=14, font_family="Montserrat", showarrow=False, font_color=COLOR_TEXTO_PRINCIPAL)]
         )
         
         st.plotly_chart(fig_ger, use_container_width=True, config={'displayModeBar': False})
@@ -1270,7 +1346,7 @@ else:
 
 
 # ==============================================================================
-# 11. NUEVA SECCIÓN: CRONOGRAMA DE PAGOS DE EQUIPOS
+# 11. NUEVA SECCIÓN: CRONOGRAMA DE PAGOS DE EQUIPOS (VISTA INTEGRAL CON ROWSPAN)
 # ==============================================================================
 st.markdown('<hr style="border: 1px solid #E2E8F0; margin: 40px 0;">', unsafe_allow_html=True)
 st.markdown(f'<h3 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; margin-bottom: 20px;">Cronograma de Pagos y Adquisición de Equipos</h3>', unsafe_allow_html=True)
@@ -1278,14 +1354,21 @@ st.markdown(f'<h3 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; margi
 @st.cache_data
 def cargar_cronograma_equipos(archivo):
     try:
-        # Rebobinamos y leemos un bloque grande de las columnas C a la J
         archivo.seek(0)
-        df = pd.read_excel(archivo, sheet_name='METRICAS', usecols="C:J", header=None)
-        df.columns = ['Proveedor', 'Modelo', 'Semana_1', 'Semana_2', 'Semana_3', 'Semana_4', 'Total_Modelo', 'Total_Proveedor']
+        # Ampliamos el margen de lectura a 40 filas para absorber sin problemas los nuevos modelos agregados
+        df = pd.read_excel(archivo, sheet_name='METRICAS', skiprows=145, nrows=40, usecols="C:N", header=None)
         
-        # Limpiador Latino infalible
+        df.columns = [
+            'Proveedor', 'Modelo', 
+            'S1_Est', 'S1_Real', 
+            'S2_Est', 'S2_Real', 
+            'S3_Est', 'S3_Real', 
+            'S4_Est', 'S4_Real', 
+            'Total_Modelo', 'Total_Proveedor'
+        ]
+        
         def limpiar_num(val):
-            if pd.isna(val) or str(val).strip() in ['#N/D', '', 'nan', 'None']: return 0.0
+            if pd.isna(val) or str(val).strip() in ['#N/D', '', 'nan', 'None', '-']: return 0.0
             if isinstance(val, (int, float)): return float(val)
             import re
             v = re.sub(r'[^\d\.,\-]', '', str(val))
@@ -1294,114 +1377,173 @@ def cargar_cronograma_equipos(archivo):
             try: return float(v)
             except: return 0.0
 
-        # Radar para encontrar dónde empiezan las tablas
-        idx_cant = df[df['Proveedor'].astype(str).str.contains(r'CRONOGRAMA DE PAGOS EQUIPOS \(CANTIDAD\)', case=False, na=False, regex=True)].index
-        idx_usd = df[df['Proveedor'].astype(str).str.contains(r'CRONOGRAMA DE PAGOS EQUIPOS \(USD\)', case=False, na=False, regex=True)].index
+        idx_cant = df[df['Proveedor'].astype(str).str.contains(r'CRONOGRAMA DE PAGOS EQUIPOS \(CANTIDAD\)', case=False, na=False)].index
+        idx_usd = df[df['Proveedor'].astype(str).str.contains(r'CRONOGRAMA DE PAGOS EQUIPOS \(USD\)', case=False, na=False)].index
 
         df_cant = pd.DataFrame()
         df_usd = pd.DataFrame()
-        totales = {'cant': 0.0, 'usd': 0.0}
+        totales = {'cant_est': 0.0, 'cant_real': 0.0, 'usd_est': 0.0, 'usd_real': 0.0}
 
-        columnas_numericas = ['Semana_1', 'Semana_2', 'Semana_3', 'Semana_4', 'Total_Modelo', 'Total_Proveedor']
+        columnas_numericas = ['S1_Est', 'S1_Real', 'S2_Est', 'S2_Real', 'S3_Est', 'S3_Real', 'S4_Est', 'S4_Real', 'Total_Modelo', 'Total_Proveedor']
 
         # 1. Extraer Tabla de Cantidades
         if len(idx_cant) > 0:
-            start_cant = idx_cant[0] + 2 # Saltar título y cabeceras
-            df_subset = df.iloc[start_cant:start_cant+15]
+            start_cant = idx_cant[0] + 2 
+            df_subset = df.iloc[start_cant:start_cant+25]
             idx_total = df_subset[df_subset['Proveedor'].astype(str).str.strip().str.upper() == 'TOTAL'].index
             if len(idx_total) > 0:
                 end_cant = idx_total[0]
-                df_cant = df.iloc[start_cant:end_cant].copy()
+                df_cant = df.iloc[start_cant:end_cant + 1].copy()
                 for col in columnas_numericas:
                     df_cant[col] = df_cant[col].apply(limpiar_num)
-                totales['cant'] = limpiar_num(df.loc[end_cant, 'Total_Modelo'])
+                
+                # BLINDAJE DE COMBINACIÓN: Identificamos la marca real y propagamos su sumatoria máxima a todo su bloque
+                df_cant['Prov_Clean'] = df_cant['Proveedor'].replace('', pd.NA).ffill()
+                for prov_name, group in df_cant.groupby('Prov_Clean'):
+                    if prov_name.upper() != 'TOTAL':
+                        max_tot = group['Total_Proveedor'].max()
+                        df_cant.loc[df_cant['Prov_Clean'] == prov_name, 'Total_Proveedor'] = max_tot
+                
+                totales['cant_est'] = df_cant.loc[end_cant, 'Total_Modelo']
+                totales['cant_real'] = df_cant.loc[end_cant, 'Total_Proveedor']
 
         # 2. Extraer Tabla de USD
         if len(idx_usd) > 0:
             start_usd = idx_usd[0] + 2
-            df_subset_usd = df.iloc[start_usd:start_usd+15]
+            df_subset_usd = df.iloc[start_usd:start_usd+25]
             idx_total_usd = df_subset_usd[df_subset_usd['Proveedor'].astype(str).str.strip().str.upper() == 'TOTAL'].index
             if len(idx_total_usd) > 0:
                 end_usd = idx_total_usd[0]
-                df_usd = df.iloc[start_usd:end_usd].copy()
+                df_usd = df.iloc[start_usd:end_usd + 1].copy()
                 for col in columnas_numericas:
                     df_usd[col] = df_usd[col].apply(limpiar_num)
-                totales['usd'] = limpiar_num(df.loc[end_usd, 'Total_Modelo'])
+                
+                df_usd['Prov_Clean'] = df_usd['Proveedor'].replace('', pd.NA).ffill()
+                for prov_name, group in df_usd.groupby('Prov_Clean'):
+                    if prov_name.upper() != 'TOTAL':
+                        max_tot = group['Total_Proveedor'].max()
+                        df_usd.loc[df_usd['Prov_Clean'] == prov_name, 'Total_Proveedor'] = max_tot
+                
+                totales['usd_est'] = df_usd.loc[end_usd, 'Total_Modelo']
+                totales['usd_real'] = df_usd.loc[end_usd, 'Total_Proveedor']
 
         return df_cant, df_usd, totales
-    except Exception as e:
-        return pd.DataFrame(), pd.DataFrame(), {'cant': 0.0, 'usd': 0.0}
+    except Exception:
+        return pd.DataFrame(), pd.DataFrame(), {'cant_est': 0.0, 'cant_real': 0.0, 'usd_est': 0.0, 'usd_real': 0.0}
 
 df_crono_cant, df_crono_usd, totales_crono = cargar_cronograma_equipos(archivo_excel)
 
 if not df_crono_cant.empty and not df_crono_usd.empty:
-    # Tarjetas Resumen (KPIs)
     col_kpi_eq1, col_kpi_eq2 = st.columns(2)
     with col_kpi_eq1:
         st.markdown(f"""
         <div class="premium-card" style="border-left: 6px solid {COLOR_CAJA_CELESTE}; text-align: center;">
-            <div class="card-label">Total Equipos Programados</div>
-            <div class="card-value" style="color: {COLOR_TEXTO_PRINCIPAL};">{int(totales_crono['cant']):,}</div>
+            <div class="card-label">Equipos Programados (Est.)</div>
+            <div class="card-value" style="color: {COLOR_TEXTO_PRINCIPAL};">{int(totales_crono['cant_est']):,}</div>
+            <div class="card-sub-value" style="color: #0056B3; font-weight: 700; margin-top: 8px;">✅ Cancelado (Real): {int(totales_crono['cant_real']):,}</div>
         </div>
         """, unsafe_allow_html=True)
     with col_kpi_eq2:
         st.markdown(f"""
         <div class="premium-card" style="border-left: 6px solid #28a745; text-align: center;">
-            <div class="card-label">Total a Pagar (USD)</div>
-            <div class="card-value" style="color: #28a745;">${format_money_ve(totales_crono['usd'])}</div>
+            <div class="card-label">Total a Pagar (USD Est.)</div>
+            <div class="card-value" style="color: #28a745;">${format_money_ve(totales_crono['usd_est'])}</div>
+            <div class="card-sub-value" style="color: #28a745; font-weight: 700; margin-top: 8px;">✅ Cancelado (Real): ${format_money_ve(totales_crono['usd_real'])}</div>
         </div>
         """, unsafe_allow_html=True)
 
-    # Pestañas Interactivas
     tab_cant, tab_usd = st.tabs(["📦 Unidades Físicas (Cantidad)", "💵 Cronograma Financiero (USD)"])
 
-    # Función para generar la tabla HTML con estilo
     def generar_tabla_crono(df, es_usd=False):
         prefijo = "$" if es_usd else ""
-        color_texto = "#28a745" if es_usd else COLOR_TEXTO_PRINCIPAL
         
-        html = f"""
-        <div class="premium-card" style="padding: 0; overflow: hidden;">
-        <table style='width:100%; border-collapse: collapse; font-family: "Montserrat", sans-serif; font-size: 0.85rem;'>
-            <thead>
-                <tr style="background-color: {COLOR_TEXTO_PRINCIPAL}; color: white;">
-                    <th style='padding: 12px; text-align: left;'>Proveedor</th>
-                    <th style='padding: 12px; text-align: left;'>Modelo</th>
-                    <th style='padding: 12px; text-align: center;'>1era Sem</th>
-                    <th style='padding: 12px; text-align: center;'>2da Sem</th>
-                    <th style='padding: 12px; text-align: center;'>3era Sem</th>
-                    <th style='padding: 12px; text-align: center;'>4ta Sem</th>
-                    <th style='padding: 12px; text-align: right; background-color: rgba(255,255,255,0.1);'>Total Modelo</th>
-                </tr>
-            </thead>
-            <tbody>
-        """
-        for _, row in df.iterrows():
+        # Estructura inicial sin sangrías
+        html = f"""<div class="premium-card" style="padding: 0; overflow: hidden;">
+<table style='width:100%; border-collapse: collapse; font-family: "Montserrat", sans-serif; font-size: 0.82rem;'>
+<thead>
+<tr style="background-color: {COLOR_TEXTO_PRINCIPAL}; color: white;">
+<th rowspan="2" style='padding: 10px; text-align: left; border-right: 1px solid rgba(255,255,255,0.1);'>Proveedor</th>
+<th rowspan="2" style='padding: 10px; text-align: left; border-right: 1px solid rgba(255,255,255,0.1);'>Modelo</th>
+<th colspan="2" style='padding: 5px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.1);'>Sem 1</th>
+<th colspan="2" style='padding: 5px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.1);'>Sem 2</th>
+<th colspan="2" style='padding: 5px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.1);'>Sem 3</th>
+<th colspan="2" style='padding: 5px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.1);'>Sem 4</th>
+<th rowspan="2" style='padding: 10px; text-align: right; background-color: rgba(255,255,255,0.1);'>Total Mod.</th>
+<th rowspan="2" style='padding: 10px; text-align: right; background-color: rgba(255,255,255,0.15); color: {COLOR_AMARILLO};'>Total Prov.</th>
+</tr>
+<tr style="background-color: {COLOR_TEXTO_PRINCIPAL}; color: {COLOR_AMARILLO}; font-size: 0.7rem;">
+<th style='padding: 4px; text-align: center;'>Est.</th><th style='padding: 4px; text-align: center; color: #00AEEF; border-right: 1px solid rgba(255,255,255,0.1);'>Real</th>
+<th style='padding: 4px; text-align: center;'>Est.</th><th style='padding: 4px; text-align: center; color: #00AEEF; border-right: 1px solid rgba(255,255,255,0.1);'>Real</th>
+<th style='padding: 4px; text-align: center;'>Est.</th><th style='padding: 4px; text-align: center; color: #00AEEF; border-right: 1px solid rgba(255,255,255,0.1);'>Real</th>
+<th style='padding: 4px; text-align: center;'>Est.</th><th style='padding: 4px; text-align: center; color: #00AEEF; border-right: 1px solid rgba(255,255,255,0.1);'>Real</th>
+</tr>
+</thead>
+<tbody>"""
+        
+        # Mapeo preciso de pertenencia de marca para calcular el rowspan exacto
+        marcas = []
+        marca_actual = ""
+        for idx, row in df.iterrows():
+            prov = str(row['Proveedor']).replace('nan', '').strip()
+            if prov.upper() == "TOTAL":
+                marcas.append("TOTAL")
+            else:
+                if prov != "": marca_actual = prov
+                marcas.append(marca_actual)
+                
+        df_render = df.copy()
+        df_render['Marca_Clean'] = marcas
+        
+        filas_por_marca = df_render[df_render['Marca_Clean'] != 'TOTAL']['Marca_Clean'].value_counts().to_dict()
+        conteo_marca = {}
+
+        for idx, row in df_render.iterrows():
+            marca = row['Marca_Clean']
+            es_total_row = (marca == "TOTAL")
+            bg_row = f"background-color: {COLOR_TEXTO_PRINCIPAL}; color: white; font-weight: 800;" if es_total_row else ""
+            
+            if not es_total_row:
+                conteo_marca[marca] = conteo_marca.get(marca, 0) + 1
+                es_primera_fila_marca = (conteo_marca[marca] == 1)
+            else:
+                es_primera_fila_marca = True
+
             def fmt(val):
-                if val == 0: return "-"
+                if pd.isna(val) or val == 0: return "-" if not es_total_row else "0"
                 return f"{prefijo}{format_money_ve(val)}" if es_usd else f"{int(val):,}"
 
-            html += f"""
-            <tr style="border-bottom: 1px solid {COLOR_GRIS_CLARO};">
-                <td style='padding: 10px 12px; color: {COLOR_GRIS_TEXTO}; font-weight: 600;'>{str(row['Proveedor']).replace('nan', '')}</td>
-                <td style='padding: 10px 12px; color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 700;'>{str(row['Modelo']).replace('nan', '')}</td>
-                <td style='padding: 10px 12px; text-align: center; color: {COLOR_GRIS_TEXTO};'>{fmt(row['Semana_1'])}</td>
-                <td style='padding: 10px 12px; text-align: center; color: {COLOR_GRIS_TEXTO};'>{fmt(row['Semana_2'])}</td>
-                <td style='padding: 10px 12px; text-align: center; color: {COLOR_GRIS_TEXTO};'>{fmt(row['Semana_3'])}</td>
-                <td style='padding: 10px 12px; text-align: center; color: {COLOR_GRIS_TEXTO};'>{fmt(row['Semana_4'])}</td>
-                <td style='padding: 10px 12px; text-align: right; color: {color_texto}; font-weight: 800; background-color: #F8FAFC;'>{fmt(row['Total_Modelo'])}</td>
-            </tr>
-            """
-        html += "</tbody></table></div>"
+            prov_disp = str(row['Proveedor']).replace('nan', '').strip()
+            mod_disp = str(row['Modelo']).replace('nan', '').strip()
+            
+            # Generamos las celdas estándar de la izquierda
+            filas_td = f"""<td style='padding: 8px 10px; border-right: 1px solid {COLOR_GRIS_CLARO}; font-weight: 700; color: {COLOR_TEXTO_PRINCIPAL if not es_total_row else "white"};'>{prov_disp}</td>
+<td style='padding: 8px 10px; border-right: 1px solid {COLOR_GRIS_CLARO}; color: {COLOR_GRIS_TEXTO if not es_total_row else "white"}; font-weight: 600;'>{mod_disp}</td>
+<td style='padding: 8px 5px; text-align: center;'>{fmt(row['S1_Est'])}</td>
+<td style='padding: 8px 5px; text-align: center; border-right: 1px solid {COLOR_GRIS_CLARO}; background-color: rgba(0, 174, 239, 0.05); font-weight: 600;'>{fmt(row['S1_Real'])}</td>
+<td style='padding: 8px 5px; text-align: center;'>{fmt(row['S2_Est'])}</td>
+<td style='padding: 8px 5px; text-align: center; border-right: 1px solid {COLOR_GRIS_CLARO}; background-color: rgba(0, 174, 239, 0.05); font-weight: 600;'>{fmt(row['S2_Real'])}</td>
+<td style='padding: 8px 5px; text-align: center;'>{fmt(row['S3_Est'])}</td>
+<td style='padding: 8px 5px; text-align: center; border-right: 1px solid {COLOR_GRIS_CLARO}; background-color: rgba(0, 174, 239, 0.05); font-weight: 600;'>{fmt(row['S3_Real'])}</td>
+<td style='padding: 8px 5px; text-align: center;'>{fmt(row['S4_Est'])}</td>
+<td style='padding: 8px 5px; text-align: center; border-right: 1px solid {COLOR_GRIS_CLARO}; background-color: rgba(0, 174, 239, 0.05); font-weight: 600;'>{fmt(row['S4_Real'])}</td>
+<td style='padding: 8px 10px; text-align: right; font-weight: 800; background-color: rgba(0,0,0,0.03);'>{fmt(row['Total_Modelo'])}</td>"""
+
+            # LÓGICA ROWSPAN: Imprime el Total por Proveedor solo en la primera fila de la marca y la estira hacia abajo
+            if es_total_row:
+                td_n = f"<td style='padding: 8px 10px; text-align: right; font-weight: 800; background-color: rgba(0,0,0,0.06); color: white;'>{fmt(row['Total_Proveedor'])}</td>"
+            elif es_primera_fila_marca:
+                rspan = filas_por_marca[marca]
+                td_n = f"<td rowspan='{rspan}' style='padding: 8px 10px; text-align: right; vertical-align: middle; font-weight: 800; background-color: rgba(0,0,0,0.06); color: {COLOR_AMARILLO}; border-bottom: 1px solid {COLOR_GRIS_CLARO};'>{fmt(row['Total_Proveedor'])}</td>"
+            else:
+                td_n = "" # Suprime la celda para permitir la expansión vertical nativa
+
+            html += f"\n<tr style='border-bottom: 1px solid {COLOR_GRIS_CLARO}; {bg_row}'>{filas_td}{td_n}</tr>"
+
+        html += "\n</tbody></table></div>"
         return html
 
-    with tab_cant:
-        st.markdown(generar_tabla_crono(df_crono_cant, es_usd=False).replace('\n', ''), unsafe_allow_html=True)
-    with tab_usd:
-        st.markdown(generar_tabla_crono(df_crono_usd, es_usd=True).replace('\n', ''), unsafe_allow_html=True)
-else:
-    st.info("No se encontró el cronograma de equipos en el archivo actual.")
-
+    with tab_cant: st.markdown(generar_tabla_crono(df_crono_cant, es_usd=False), unsafe_allow_html=True)
+    with tab_usd: st.markdown(generar_tabla_crono(df_crono_usd, es_usd=True), unsafe_allow_html=True)
 
 
 # ==============================================================================
@@ -1429,7 +1571,7 @@ with st.sidebar:
         mime="application/vnd.ms-excel"
     )
 
-    # --- 2. GENERADOR DE VISTA HTML COMPLETA (ACTUALIZADO CON EQUIPOS) ---
+    # --- 2. GENERADOR DE VISTA HTML COMPLETA ---
     
     def generar_filas_html(df, col_concepto, col_monto, col_pct=None):
         filas = ""
@@ -1445,7 +1587,7 @@ with st.sidebar:
                 filas += "</tr>"
         return filas
 
-    # Función para filas de equipos (ahora más compactas para el reporte)
+    # Generador de filas compactas adaptado a las 11 columnas del nuevo formato
     def generar_filas_crono_html(df, es_usd=False):
         filas = ""
         prefijo = "$" if es_usd else ""
@@ -1453,13 +1595,22 @@ with st.sidebar:
             for _, row in df.iterrows():
                 def f(v): return f"{prefijo}{format_money_ve(v)}" if es_usd else f"{int(v):,}"
                 filas += f"<tr>"
-                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; font-size: 10px;'>{row['Proveedor']}</td>"
-                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; font-size: 10px; font-weight: bold;'>{row['Modelo']}</td>"
-                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 10px;'>{f(row['Semana_1'])}</td>"
-                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 10px;'>{f(row['Semana_2'])}</td>"
-                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 10px;'>{f(row['Semana_3'])}</td>"
-                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 10px;'>{f(row['Semana_4'])}</td>"
-                filas += f"<td style='padding: 4px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 10px; background: #F8FAFC;'>{f(row['Total_Modelo'])}</td>"
+                filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; font-size: 11px; border-right: 1px solid #E2E8F0;'>{row['Proveedor']}</td>"
+                filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; font-size: 11px; font-weight: bold; border-right: 1px solid #E2E8F0;'>{row['Modelo']}</td>"
+                
+                filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 11px; color: #64748B;'>{f(row['S1_Est'])}</td>"
+                filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 11px; font-weight: 600; color: #0056B3; border-right: 1px solid #E2E8F0; background: #F8FAFC;'>{f(row['S1_Real'])}</td>"
+                
+                filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 11px; color: #64748B;'>{f(row['S2_Est'])}</td>"
+                filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 11px; font-weight: 600; color: #0056B3; border-right: 1px solid #E2E8F0; background: #F8FAFC;'>{f(row['S2_Real'])}</td>"
+                
+                filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 11px; color: #64748B;'>{f(row['S3_Est'])}</td>"
+                filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 11px; font-weight: 600; color: #0056B3; border-right: 1px solid #E2E8F0; background: #F8FAFC;'>{f(row['S3_Real'])}</td>"
+                
+                filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 11px; color: #64748B;'>{f(row['S4_Est'])}</td>"
+                filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 11px; font-weight: 600; color: #0056B3; border-right: 1px solid #E2E8F0; background: #F8FAFC;'>{f(row['S4_Real'])}</td>"
+                
+                filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 11px; background: #F1F5F9; color: #001F5B;'>{f(row['Total_Modelo'])}</td>"
                 filas += f"</tr>"
         return filas
     
@@ -1468,8 +1619,6 @@ with st.sidebar:
     html_ger = generar_filas_html(df_gerencia, 'Gerencia', 'Monto', 'Porcentaje') if 'df_gerencia' in locals() else ""
     html_crono_cant = generar_filas_crono_html(df_crono_cant, False) if 'df_crono_cant' in locals() else ""
     html_crono_usd = generar_filas_crono_html(df_crono_usd, True) if 'df_crono_usd' in locals() else ""
-    
-    
     
     html_proy = ""
     if 'df_proyeccion' in locals() and not df_proyeccion.empty:
@@ -1503,7 +1652,6 @@ with st.sidebar:
             table {{ width: 100%; border-collapse: collapse; margin-top: 15px; }}
             th {{ background-color: #001F5B; color: white; padding: 10px; text-align: left; font-size: 12px; text-transform: uppercase; }}
             
-            /* LA MAGIA SUCEDE AQUI: Obligamos a que cada columna sea 50% exacto */
             .two-columns {{ display: flex; width: 100%; gap: 30px; margin-top: 20px; }}
             .two-columns > div {{ width: 50%; box-sizing: border-box; }}
             
@@ -1605,23 +1753,66 @@ with st.sidebar:
                 </div>
             </div>
 
-            <div class="two-columns">
-                <div>
-                    <h2>7. Cronograma Adquisición</h2>
-                    <p style="font-size: 11px; color: #64748B; margin-bottom: 5px;">Unidades físicas programadas.</p>
-                    <table>
-                        <tr><th>Prov.</th><th>Modelo</th><th style="text-align:center;">S1</th><th style="text-align:center;">S2</th><th style="text-align:center;">S3</th><th style="text-align:center;">S4</th><th style="text-align:right;">Total</th></tr>
+            <div style="margin-top: 40px;">
+                <h2>7. Cronograma de Adquisición de Equipos (Cantidad)</h2>
+                <p style="font-size: 12px; color: #64748B; margin-bottom: 10px;">Detalle de unidades físicas programadas (Est.) vs canceladas (Real).</p>
+                <table style="width: 100%;">
+                    <thead>
+                        <tr style="background-color: #001F5B; color: white;">
+                            <th rowspan="2" style="padding: 8px; text-align: left; border-right: 1px solid rgba(255,255,255,0.2);">Proveedor</th>
+                            <th rowspan="2" style="padding: 8px; text-align: left; border-right: 1px solid rgba(255,255,255,0.2);">Modelo</th>
+                            <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 1</th>
+                            <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 2</th>
+                            <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 3</th>
+                            <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 4</th>
+                            <th rowspan="2" style="padding: 8px; text-align: right;">Total Est.</th>
+                        </tr>
+                        <tr style="background-color: #001F5B; color: #FFB81C; font-size: 10px;">
+                            <th style="padding: 4px; text-align: center;">Est.</th>
+                            <th style="padding: 4px; text-align: center; border-right: 1px solid rgba(255,255,255,0.2); color: #00AEEF;">Real</th>
+                            <th style="padding: 4px; text-align: center;">Est.</th>
+                            <th style="padding: 4px; text-align: center; border-right: 1px solid rgba(255,255,255,0.2); color: #00AEEF;">Real</th>
+                            <th style="padding: 4px; text-align: center;">Est.</th>
+                            <th style="padding: 4px; text-align: center; border-right: 1px solid rgba(255,255,255,0.2); color: #00AEEF;">Real</th>
+                            <th style="padding: 4px; text-align: center;">Est.</th>
+                            <th style="padding: 4px; text-align: center; border-right: 1px solid rgba(255,255,255,0.2); color: #00AEEF;">Real</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {html_crono_cant}
-                    </table>
-                </div>
-                <div>
-                    <h2>8. Cronograma USD</h2>
-                    <p style="font-size: 11px; color: #64748B; margin-bottom: 5px;">Desembolsos en divisas.</p>
-                    <table>
-                        <tr><th>Prov.</th><th>Modelo</th><th style="text-align:center;">S1</th><th style="text-align:center;">S2</th><th style="text-align:center;">S3</th><th style="text-align:center;">S4</th><th style="text-align:right;">Total</th></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="margin-top: 40px;">
+                <h2>8. Cronograma Financiero de Equipos (USD)</h2>
+                <p style="font-size: 12px; color: #64748B; margin-bottom: 10px;">Estimación de desembolsos programados (Est.) vs ejecutados (Real).</p>
+                <table style="width: 100%;">
+                    <thead>
+                        <tr style="background-color: #001F5B; color: white;">
+                            <th rowspan="2" style="padding: 8px; text-align: left; border-right: 1px solid rgba(255,255,255,0.2);">Proveedor</th>
+                            <th rowspan="2" style="padding: 8px; text-align: left; border-right: 1px solid rgba(255,255,255,0.2);">Modelo</th>
+                            <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 1</th>
+                            <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 2</th>
+                            <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 3</th>
+                            <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 4</th>
+                            <th rowspan="2" style="padding: 8px; text-align: right;">Total Est.</th>
+                        </tr>
+                        <tr style="background-color: #001F5B; color: #FFB81C; font-size: 10px;">
+                            <th style="padding: 4px; text-align: center;">Est.</th>
+                            <th style="padding: 4px; text-align: center; border-right: 1px solid rgba(255,255,255,0.2); color: #00AEEF;">Real</th>
+                            <th style="padding: 4px; text-align: center;">Est.</th>
+                            <th style="padding: 4px; text-align: center; border-right: 1px solid rgba(255,255,255,0.2); color: #00AEEF;">Real</th>
+                            <th style="padding: 4px; text-align: center;">Est.</th>
+                            <th style="padding: 4px; text-align: center; border-right: 1px solid rgba(255,255,255,0.2); color: #00AEEF;">Real</th>
+                            <th style="padding: 4px; text-align: center;">Est.</th>
+                            <th style="padding: 4px; text-align: center; border-right: 1px solid rgba(255,255,255,0.2); color: #00AEEF;">Real</th>
+                        </tr>
+                    </thead>
+                    <tbody>
                         {html_crono_usd}
-                    </table>
-                </div>
+                    </tbody>
+                </table>
             </div>
 
             <p style="text-align: center; color: #94A3B8; font-size: 11px; margin-top: 50px;">
@@ -1641,3 +1832,4 @@ with st.sidebar:
     )
     
 
+    
