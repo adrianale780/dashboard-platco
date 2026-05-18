@@ -786,11 +786,49 @@ else:
 inv_banco_bs = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Saldo Bancario Inversion', case=False, na=False)]['Bs'].sum()
 inv_banco_usd = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Saldo Bancario Inversion', case=False, na=False)]['USD'].sum()
 
-inv_equipos_bs = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Equipos Por Pagar', case=False, na=False)]['Bs'].sum()
-inv_equipos_usd = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Equipos Por Pagar', case=False, na=False)]['USD'].sum()
+
 
 inv_fiscales_bs = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Apartados para compromisos Fiscales', case=False, na=False)]['Bs'].sum()
 inv_fiscales_usd = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Apartados para compromisos Fiscales', case=False, na=False)]['USD'].sum()
+
+@st.cache_data
+def cargar_equipos_pagar_semanal(archivo):
+    try:
+        archivo.seek(0)
+        # Leemos las columnas C, D y E alrededor de la fila 50 para atrapar la tabla
+        df = pd.read_excel(archivo, sheet_name='METRICAS', skiprows=49, nrows=20, usecols="C:E", header=None)
+        df.columns = ['Concepto', 'Bs', 'USD']
+        
+        # Buscamos el título de la tabla
+        idx_titulo = df[df['Concepto'].astype(str).str.contains('EQUIPOS POR PAGAR SEMANAL', case=False, na=False)].index
+        
+        if len(idx_titulo) > 0:
+            start_idx = idx_titulo[0]
+            # Buscamos la fila "Total" (Tu fila 62 de Excel) debajo del título
+            df_subset = df.iloc[start_idx:start_idx+15]
+            idx_total = df_subset[df_subset['Concepto'].astype(str).str.strip().str.lower() == 'total'].index
+            
+            if len(idx_total) > 0:
+                val_bs = df_subset.loc[idx_total[0], 'Bs']   # Columna D
+                val_usd = df_subset.loc[idx_total[0], 'USD'] # Columna E
+                
+                # Súper Limpiador Latino
+                def limpiar_latino(val):
+                    if pd.isna(val) or str(val).strip() in ['#N/D', 'nan', '', 'None']: return 0.0
+                    if isinstance(val, (int, float)): return float(val)
+                    import re
+                    v = re.sub(r'[^\d\.,\-]', '', str(val))
+                    if '.' in v and ',' in v: v = v.replace('.', '').replace(',', '.')
+                    elif ',' in v: v = v.replace(',', '.')
+                    try: return float(v)
+                    except: return 0.0
+                    
+                return abs(limpiar_latino(val_bs)), abs(limpiar_latino(val_usd))
+    except Exception:
+        pass
+    return 0.0, 0.0
+
+inv_equipos_bs, inv_equipos_usd = cargar_equipos_pagar_semanal(archivo_excel)
 
 # NUEVO: Extracción exacta del cuadro "CxC Para Inversión" (Especializado)
 @st.cache_data
