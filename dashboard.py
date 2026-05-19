@@ -485,7 +485,7 @@ with col_kpi2:
 with col_kpi3:
     st.markdown(f"""
     <div class="premium-card" style="border-bottom: 4px solid {COLOR_AMARILLO};">
-        <div class="card-label">Apartados Abril</div>
+        <div class="card-label">Apartados</div>
         <div class="card-value">${format_money_ve(abs(apartados_usd))}</div>
         <div class="card-sub-value">Bs {format_money_ve(abs(apartados_bs))}</div>
     </div>
@@ -1728,7 +1728,7 @@ with st.sidebar:
                     <p class="kpi-sub">Bs {format_money_ve(compromisos_bs)}</p>
                 </div>
                 <div class="kpi-card">
-                    <div class="kpi-label">Apartados Abril</div>
+                    <div class="kpi-label">Apartados</div>
                     <p class="kpi-val">${format_money_ve(apartados_usd)}</p>
                     <p class="kpi-sub">Bs {format_money_ve(apartados_bs)}</p>
                 </div>
