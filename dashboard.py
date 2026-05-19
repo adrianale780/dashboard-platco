@@ -333,8 +333,8 @@ html_resumen = f"""<style>
 <div class="resumen-row">
 <div class="resumen-item"><span class="resumen-label">Saldo Bancario Operativo</span><span class="resumen-valor">{format_money_ve(val_op_banco)}</span></div>
 <div class="resumen-item"><span class="resumen-label">Compromisos de CxP</span><span class="resumen-valor">{format_money_ve(val_op_cxp)}</span></div>
-<div class="resumen-item"><span class="resumen-label">Apartados Prov. Abril</span><span class="resumen-valor">{format_money_ve(val_op_apartado)}</span></div>
-<div class="resumen-item" style="border-right: none;"><span class="resumen-label">CxC Aliados/Bancos</span><span class="resumen-valor">{format_money_ve(val_op_cxc)}</span></div>
+<div class="resumen-item"><span class="resumen-label">Apartados Proveedores e Impuestos</span><span class="resumen-valor">{format_money_ve(val_op_apartado)}</span></div>
+<div class="resumen-item" style="border-right: none;"><span class="resumen-label">Cuentas por Cobrar</span><span class="resumen-valor">{format_money_ve(val_op_cxc)}</span></div>
 <div style="display: flex; gap: 10px; margin-left: 20px;">
 <div style="display: flex; flex-direction: column; gap: 5px;"><div class="caja-celeste">{format_money_ve(val_op_disp_hoy)}</div><div class="caja-blanca">Saldo Operativo<br>Disponible a Hoy</div></div>
 <div style="display: flex; flex-direction: column; gap: 5px;"><div class="caja-celeste">{format_money_ve(val_op_proyectado)}</div><div class="caja-blanca">Saldo Operativo<br>proyectado fin de mes</div></div>
