@@ -642,40 +642,43 @@ else:
 st.markdown('<hr style="border: 1px solid #E2E8F0; margin: 40px 0;">', unsafe_allow_html=True)
 st.markdown(f'<h3 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; margin-bottom: 20px;">Detalle de Compromisos por Cobrar</h3>', unsafe_allow_html=True)
 
-# 10.1 CARGA Y LIMPIEZA DE DATOS (COORDENADAS F:G, FILA 69)
+# 10.1 CARGA Y LIMPIEZA DE DATOS (COORDENADAS F:H, FILA 69)
 @st.cache_data
 def cargar_compromisos_cobrar(archivo, skip_rows):
     try:
-        # Leemos las columnas F y G de tu imagen (skip_rows=68 para empezar en la 69)
-        df = pd.read_excel(archivo, sheet_name='METRICAS', skiprows=skip_rows, nrows=10, usecols="F:G", header=None)
-        df.columns = ['Concepto', 'Monto']
+        # CAMBIO CLAVE: Leemos desde la F hasta la H para atrapar la columna de porcentajes
+        df = pd.read_excel(archivo, sheet_name='METRICAS', skiprows=skip_rows, nrows=10, usecols="F:H", header=None)
+        df.columns = ['Concepto', 'Monto', 'Porcentaje']
         
         df = df.dropna(how='all')
         
         # Filtramos la basura y la fila de totales
-        palabras_basura = ['Total', 'Conceptos', 'COMPROMISOS', 'Suma de Por Cobrar BS']
+        palabras_basura = ['Total', 'Conceptos', 'COMPROMISOS', 'Suma de Por Cobrar BS', '% de Participación']
         df = df[~df['Concepto'].astype(str).str.strip().isin(palabras_basura)]
         df = df[~df['Concepto'].astype(str).str.contains('Total', case=False, na=False)]
 
         # Limpiamos los montos
         df['Monto'] = pd.to_numeric(df['Monto'].astype(str).str.replace('$', '', regex=False).str.replace(',', '.', regex=False).str.replace(' ', '', regex=False).str.replace('-', '', regex=False), errors='coerce').fillna(0.0).abs()
         
+        # --- NUEVO: Limpiamos los porcentajes extraídos de Excel ---
+        def limpiar_pct(val):
+            if pd.isna(val): return 0.0
+            if isinstance(val, (int, float)):
+                # Si Excel envía el porcentaje como decimal (ej. 0.76 para 76%)
+                if 0 < val <= 1.0: return float(val) * 100
+                return float(val)
+            # Si viene como texto con '%'
+            v_str = str(val).replace('%', '').replace(',', '.').strip()
+            try: return float(v_str)
+            except: return 0.0
+            
+        df['Porcentaje'] = df['Porcentaje'].apply(limpiar_pct)
+        # -----------------------------------------------------------
+        
         # Filtramos vacíos
         df = df[(df['Monto'] > 0) & (df['Concepto'].astype(str).str.strip() != '') & (df['Concepto'].astype(str).str.strip() != 'nan')].reset_index(drop=True)
         
-        # Calculamos el porcentaje base
         total_real = df['Monto'].sum()
-        df['Porcentaje'] = (df['Monto'] / total_real) * 100 if total_real > 0 else 0
-        
-        # Aplicamos el ajuste de métricas para conceptos específicos
-        for idx, row in df.iterrows():
-            concepto_norm = str(row['Concepto']).strip().lower()
-            if 'simcard' in concepto_norm:
-                df.at[idx, 'Porcentaje'] = 84.98
-            elif 'especializado' in concepto_norm:
-                df.at[idx, 'Porcentaje'] = 81.70
-            elif 'continuidad' in concepto_norm:
-                df.at[idx, 'Porcentaje'] = 81.77
         
         # Ordenamos: Ascendente para gráfico, Descendente para tabla
         df_grafico = df.sort_values(by='Monto', ascending=True).reset_index(drop=True)
