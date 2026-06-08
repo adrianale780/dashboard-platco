@@ -203,7 +203,7 @@ def cargar_flash_report(archivo):
             buscar('Compromisos CxP', 'Bs'),
             buscar('Apartados para Compromisos Operativo', 'Bs'), # Ignoramos la palabra "abril"
             buscar('Aliados-Continuidad', 'Bs'),
-            buscar('Operativo Disponible a Hoy', 'Bs'),
+            buscar('Operativo Disponible a final de semana', 'Bs'),
             buscar('Saldo disponible proyectado', 'Bs'),
             
             buscar('Bancario Inversion', 'Bs'),
