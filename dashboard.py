@@ -214,16 +214,23 @@ def cargar_flash_report(archivo):
             buscar('Inversion proyectado a cierre', 'Bs'),
             
             buscar('Moneda Extranjera', 'USD'),
-            buscar('Boveda', 'USD')
+            buscar('Boveda', 'USD'),
+            
+            # --- NUEVO: Extraemos los valores en USD (Columna E) para las 4 cajitas ---
+            buscar('Operativo Disponible a final de semana', 'USD'),
+            buscar('Saldo disponible proyectado', 'USD'),
+            buscar('Inversion Disponible a Hoy', 'USD'),
+            buscar('Inversion proyectado a cierre', 'USD')
         )
     except Exception as e:
         st.error(f"Error procesando Resumen Consolidado: {e}")
-        return (0,)*14 # Retorna ceros si el Excel está corrupto
+        return (0,)*18 # Retorna 18 ceros si el Excel está corrupto para no romper la app
 
-# Asignamos los valores extraídos a las variables del diseño
+# Asignamos los valores extraídos a las variables del diseño (incluyendo las 4 nuevas en USD)
 (val_op_banco, val_op_cxp, val_op_apartado, val_op_cxc, val_op_disp_hoy, val_op_proyectado,
  val_inv_banco, val_inv_equipos, val_inv_apartado, val_inv_cxc, val_inv_disp_hoy, val_inv_proyectado,
- val_div_ext, val_div_boveda) = cargar_flash_report(archivo_excel)
+ val_div_ext, val_div_boveda,
+ val_op_disp_hoy_usd, val_op_proyectado_usd, val_inv_disp_hoy_usd, val_inv_proyectado_usd) = cargar_flash_report(archivo_excel)
 
 # ---> EXTRACCIÓN DIRECTA DESDE LA FUENTE (Pestaña: DISTRIBUCIÓN DE FONDOS, Celda: C50) <---
 @st.cache_data
@@ -269,37 +276,27 @@ def extraer_moneda_extranjera_directo(archivo):
 # Asignamos la variable directo desde la hoja origen
 val_div_ext = extraer_moneda_extranjera_directo(archivo_excel)
 
-
 COLOR_BANNER = "#001F5B"
 COLOR_CAJA_CELESTE = "#00AEEF"
-
 
 # ---> EXTRACCIÓN DE TASA BCV (PUNTERÍA LÁSER: CUENTAS POR COBRAR) <---
 @st.cache_data
 def extraer_tasa_bcv(archivo):
     try:
-        # Rebobinamos el archivo por seguridad
         archivo.seek(0)
-        
-        # CAMBIO CLAVE: Ahora leemos explícitamente la pestaña 'CUENTAS POR COBRAR'
-        # Escaneamos las primeras 20 filas por si el cliente movió la tabla
         df_tasa = pd.read_excel(archivo, sheet_name='CUENTAS POR COBRAR', nrows=20, header=None)
         
-        # Radar para encontrar la celda que dice "TASA BCV"
         for fila in range(len(df_tasa)):
             for col in range(len(df_tasa.columns)):
                 celda_texto = str(df_tasa.iloc[fila, col]).strip().upper()
                 
                 if 'TASA BCV' in celda_texto:
-                    # El monto debe estar en la celda de la derecha (col + 1)
                     if col + 1 < len(df_tasa.columns):
                         val = df_tasa.iloc[fila, col + 1]
                         
-                        # Si es un número puro de Excel
                         if isinstance(val, (int, float)): 
                             return float(val) if val > 0 else 1.0
                         
-                        # Si viene como texto con comas (ej. "493,37")
                         import re
                         v = re.sub(r'[^\d\.,\-]', '', str(val))
                         if '.' in v and ',' in v: v = v.replace('.', '').replace(',', '.')
@@ -308,13 +305,9 @@ def extraer_tasa_bcv(archivo):
                         tasa = float(v)
                         return tasa if tasa > 0 else 1.0
     except Exception as e:
-        # En caso de error, no mostramos nada para no asustar al usuario
         pass
-    
-    # Si no la encuentra, devuelve 1.0 para que la app siga viva
     return 1.0 
 
-# Asignamos la variable de la tasa
 tasa_bcv_actual = extraer_tasa_bcv(archivo_excel)
 
 
@@ -326,8 +319,10 @@ html_resumen = f"""<style>
 .resumen-item:last-child {{ border-right: none; padding-right: 0; }}
 .resumen-label {{ font-size: 0.75rem; color: #E2E8F0; text-transform: uppercase; margin-bottom: 3px; font-weight: 500; }}
 .resumen-valor {{ font-size: 1.1rem; font-weight: 800; }}
-.caja-celeste {{ background-color: {COLOR_CAJA_CELESTE}; padding: 10px 15px; border-radius: 6px; text-align: center; font-weight: 800; font-size: 1.1rem; min-width: 150px; }}
-.caja-blanca {{ background-color: white; color: {COLOR_BANNER}; padding: 8px 15px; border-radius: 6px; text-align: center; font-weight: 700; font-size: 0.8rem; display: flex; align-items: center; min-width: 160px; line-height: 1.1; }}
+.caja-celeste {{ background-color: {COLOR_CAJA_CELESTE}; padding: 8px 15px; border-radius: 6px; text-align: center; color: white; min-width: 150px; display: flex; flex-direction: column; justify-content: center; }}
+.caja-celeste-bs {{ font-weight: 800; font-size: 1.1rem; margin-bottom: 2px; }}
+.caja-celeste-usd {{ font-weight: 600; font-size: 0.85rem; color: #E2E8F0; }}
+.caja-blanca {{ background-color: white; color: {COLOR_BANNER}; padding: 8px 15px; border-radius: 6px; text-align: center; font-weight: 700; font-size: 0.8rem; display: flex; align-items: center; justify-content: center; min-width: 160px; line-height: 1.1; }}
 </style>
 
 <div class="resumen-row">
@@ -336,8 +331,20 @@ html_resumen = f"""<style>
 <div class="resumen-item"><span class="resumen-label">Apartados Proveedores e Impuestos</span><span class="resumen-valor">{format_money_ve(val_op_apartado)}</span></div>
 <div class="resumen-item" style="border-right: none;"><span class="resumen-label">Cuentas por Cobrar</span><span class="resumen-valor">{format_money_ve(val_op_cxc)}</span></div>
 <div style="display: flex; gap: 10px; margin-left: 20px;">
-<div style="display: flex; flex-direction: column; gap: 5px;"><div class="caja-celeste">{format_money_ve(val_op_disp_hoy)}</div><div class="caja-blanca">Saldo Operativo<br>Disponible a la semana</div></div>
-<div style="display: flex; flex-direction: column; gap: 5px;"><div class="caja-celeste">{format_money_ve(val_op_proyectado)}</div><div class="caja-blanca">Saldo Operativo<br>proyectado fin de mes</div></div>
+<div style="display: flex; flex-direction: column; gap: 5px;">
+    <div class="caja-celeste">
+        <div class="caja-celeste-bs">{format_money_ve(val_op_disp_hoy)}</div>
+        <div class="caja-celeste-usd">${format_money_ve(val_op_disp_hoy_usd)}</div>
+    </div>
+    <div class="caja-blanca">Saldo Operativo<br>Disponible a la semana</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 5px;">
+    <div class="caja-celeste">
+        <div class="caja-celeste-bs">{format_money_ve(val_op_proyectado)}</div>
+        <div class="caja-celeste-usd">${format_money_ve(val_op_proyectado_usd)}</div>
+    </div>
+    <div class="caja-blanca">Saldo Operativo<br>proyectado fin de mes</div>
+</div>
 </div>
 </div>
 
@@ -347,8 +354,20 @@ html_resumen = f"""<style>
 <div class="resumen-item"><span class="resumen-label">Apartados Fiscales</span><span class="resumen-valor">{format_money_ve(val_inv_apartado)}</span></div>
 <div class="resumen-item" style="border-right: none;"><span class="resumen-label">Universo CxC Especializado</span><span class="resumen-valor">{format_money_ve(val_inv_cxc)}</span></div>
 <div style="display: flex; gap: 10px; margin-left: 20px;">
-<div style="display: flex; flex-direction: column; gap: 5px;"><div class="caja-celeste">{format_money_ve(val_inv_disp_hoy)}</div><div class="caja-blanca">Saldo Inversión<br>Disponible Hoy</div></div>
-<div style="display: flex; flex-direction: column; gap: 5px;"><div class="caja-celeste">{format_money_ve(val_inv_proyectado)}</div><div class="caja-blanca">Saldo para inversión<br>proyectado fin de mes</div></div>
+<div style="display: flex; flex-direction: column; gap: 5px;">
+    <div class="caja-celeste">
+        <div class="caja-celeste-bs">{format_money_ve(val_inv_disp_hoy)}</div>
+        <div class="caja-celeste-usd">${format_money_ve(val_inv_disp_hoy_usd)}</div>
+    </div>
+    <div class="caja-blanca">Saldo Inversión<br>Disponible Hoy</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 5px;">
+    <div class="caja-celeste">
+        <div class="caja-celeste-bs">{format_money_ve(val_inv_proyectado)}</div>
+        <div class="caja-celeste-usd">${format_money_ve(val_inv_proyectado_usd)}</div>
+    </div>
+    <div class="caja-blanca">Saldo para inversión<br>proyectado fin de mes</div>
+</div>
 </div>
 </div>
 
