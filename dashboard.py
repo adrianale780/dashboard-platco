@@ -1415,8 +1415,8 @@ st.markdown(f'<h3 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; margi
 def cargar_cronograma_equipos(archivo):
     try:
         archivo.seek(0)
-        # Ampliamos el margen de lectura a 40 filas para absorber sin problemas los nuevos modelos agregados
-        df = pd.read_excel(archivo, sheet_name='METRICAS', skiprows=145, nrows=40, usecols="C:N", header=None)
+        # Ampliamos a la columna P para abarcar la 5ta semana
+        df = pd.read_excel(archivo, sheet_name='METRICAS', skiprows=145, nrows=40, usecols="C:P", header=None)
         
         df.columns = [
             'Proveedor', 'Modelo', 
@@ -1424,6 +1424,7 @@ def cargar_cronograma_equipos(archivo):
             'S2_Est', 'S2_Real', 
             'S3_Est', 'S3_Real', 
             'S4_Est', 'S4_Real', 
+            'S5_Est', 'S5_Real', 
             'Total_Modelo', 'Total_Proveedor'
         ]
         
@@ -1444,7 +1445,7 @@ def cargar_cronograma_equipos(archivo):
         df_usd = pd.DataFrame()
         totales = {'cant_est': 0.0, 'cant_real': 0.0, 'usd_est': 0.0, 'usd_real': 0.0}
 
-        columnas_numericas = ['S1_Est', 'S1_Real', 'S2_Est', 'S2_Real', 'S3_Est', 'S3_Real', 'S4_Est', 'S4_Real', 'Total_Modelo', 'Total_Proveedor']
+        columnas_numericas = ['S1_Est', 'S1_Real', 'S2_Est', 'S2_Real', 'S3_Est', 'S3_Real', 'S4_Est', 'S4_Real', 'S5_Est', 'S5_Real', 'Total_Modelo', 'Total_Proveedor']
 
         # 1. Extraer Tabla de Cantidades
         if len(idx_cant) > 0:
@@ -1457,7 +1458,6 @@ def cargar_cronograma_equipos(archivo):
                 for col in columnas_numericas:
                     df_cant[col] = df_cant[col].apply(limpiar_num)
                 
-                # BLINDAJE DE COMBINACIÓN: Identificamos la marca real y propagamos su sumatoria máxima a todo su bloque
                 df_cant['Prov_Clean'] = df_cant['Proveedor'].replace('', pd.NA).ffill()
                 for prov_name, group in df_cant.groupby('Prov_Clean'):
                     if prov_name.upper() != 'TOTAL':
@@ -1465,12 +1465,12 @@ def cargar_cronograma_equipos(archivo):
                         df_cant.loc[df_cant['Prov_Clean'] == prov_name, 'Total_Proveedor'] = max_tot
                 
                 totales['cant_est'] = df_cant.loc[end_cant, 'Total_Modelo']
-                
-                # CORRECCIÓN EXCLUSIVA: Sumamos únicamente las columnas reales de la fila TOTAL
+                # Sumamos hasta la semana 5
                 totales['cant_real'] = (df_cant.loc[end_cant, 'S1_Real'] + 
                                         df_cant.loc[end_cant, 'S2_Real'] + 
                                         df_cant.loc[end_cant, 'S3_Real'] + 
-                                        df_cant.loc[end_cant, 'S4_Real'])
+                                        df_cant.loc[end_cant, 'S4_Real'] +
+                                        df_cant.loc[end_cant, 'S5_Real'])
 
         # 2. Extraer Tabla de USD
         if len(idx_usd) > 0:
@@ -1490,12 +1490,12 @@ def cargar_cronograma_equipos(archivo):
                         df_usd.loc[df_usd['Prov_Clean'] == prov_name, 'Total_Proveedor'] = max_tot
                 
                 totales['usd_est'] = df_usd.loc[end_usd, 'Total_Modelo']
-                
-                # CORRECCIÓN EXCLUSIVA: Sumamos únicamente las columnas reales de la fila TOTAL
+                # Sumamos hasta la semana 5
                 totales['usd_real'] = (df_usd.loc[end_usd, 'S1_Real'] + 
                                        df_usd.loc[end_usd, 'S2_Real'] + 
                                        df_usd.loc[end_usd, 'S3_Real'] + 
-                                       df_usd.loc[end_usd, 'S4_Real'])
+                                       df_usd.loc[end_usd, 'S4_Real'] +
+                                       df_usd.loc[end_usd, 'S5_Real'])
 
         return df_cant, df_usd, totales
     except Exception:
@@ -1527,21 +1527,22 @@ if not df_crono_cant.empty and not df_crono_usd.empty:
     def generar_tabla_crono(df, es_usd=False):
         prefijo = "$" if es_usd else ""
         
-        # Mantenemos la estructura plana sin sangrías para evitar bloques de código Markdown
-        html = f"""<div class="premium-card" style="padding: 0; overflow: hidden;">
+        html = f"""<div class="premium-card" style="padding: 0; overflow: hidden; overflow-x: auto;">
 <table style='width:100%; border-collapse: collapse; font-family: "Montserrat", sans-serif; font-size: 0.82rem;'>
 <thead>
 <tr style="background-color: {COLOR_TEXTO_PRINCIPAL}; color: white;">
-<th rowspan="2" style='padding: 10px; text-align: left; border-right: 1px solid rgba(255,255,255,0.1);'>Proveedor</th>
-<th rowspan="2" style='padding: 10px; text-align: left; border-right: 1px solid rgba(255,255,255,0.1);'>Modelo</th>
+<th rowspan="2" style='padding: 10px; text-align: left; border-right: 1px solid rgba(255,255,255,0.1); min-width: 120px;'>Proveedor</th>
+<th rowspan="2" style='padding: 10px; text-align: left; border-right: 1px solid rgba(255,255,255,0.1); min-width: 150px;'>Modelo</th>
 <th colspan="2" style='padding: 5px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.1);'>Sem 1</th>
 <th colspan="2" style='padding: 5px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.1);'>Sem 2</th>
 <th colspan="2" style='padding: 5px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.1);'>Sem 3</th>
 <th colspan="2" style='padding: 5px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.1);'>Sem 4</th>
-<th rowspan="2" style='padding: 10px; text-align: right; background-color: rgba(255,255,255,0.1);'>Total Mod.</th>
-<th rowspan="2" style='padding: 10px; text-align: right; background-color: rgba(255,255,255,0.15); color: {COLOR_AMARILLO};'>Total Prov.</th>
+<th colspan="2" style='padding: 5px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.1);'>Sem 5</th>
+<th rowspan="2" style='padding: 10px; text-align: right; background-color: rgba(255,255,255,0.1); min-width: 80px;'>Total Mod.</th>
+<th rowspan="2" style='padding: 10px; text-align: right; background-color: rgba(255,255,255,0.15); color: {COLOR_AMARILLO}; min-width: 80px;'>Total Prov.</th>
 </tr>
 <tr style="background-color: {COLOR_TEXTO_PRINCIPAL}; color: {COLOR_AMARILLO}; font-size: 0.7rem;">
+<th style='padding: 4px; text-align: center;'>Est.</th><th style='padding: 4px; text-align: center; color: #00AEEF; border-right: 1px solid rgba(255,255,255,0.1);'>Real</th>
 <th style='padding: 4px; text-align: center;'>Est.</th><th style='padding: 4px; text-align: center; color: #00AEEF; border-right: 1px solid rgba(255,255,255,0.1);'>Real</th>
 <th style='padding: 4px; text-align: center;'>Est.</th><th style='padding: 4px; text-align: center; color: #00AEEF; border-right: 1px solid rgba(255,255,255,0.1);'>Real</th>
 <th style='padding: 4px; text-align: center;'>Est.</th><th style='padding: 4px; text-align: center; color: #00AEEF; border-right: 1px solid rgba(255,255,255,0.1);'>Real</th>
@@ -1594,6 +1595,8 @@ if not df_crono_cant.empty and not df_crono_usd.empty:
 <td style='padding: 8px 5px; text-align: center; border-right: 1px solid {COLOR_GRIS_CLARO}; background-color: rgba(0, 174, 239, 0.05); font-weight: 600;'>{fmt(row['S3_Real'])}</td>
 <td style='padding: 8px 5px; text-align: center;'>{fmt(row['S4_Est'])}</td>
 <td style='padding: 8px 5px; text-align: center; border-right: 1px solid {COLOR_GRIS_CLARO}; background-color: rgba(0, 174, 239, 0.05); font-weight: 600;'>{fmt(row['S4_Real'])}</td>
+<td style='padding: 8px 5px; text-align: center;'>{fmt(row['S5_Est'])}</td>
+<td style='padding: 8px 5px; text-align: center; border-right: 1px solid {COLOR_GRIS_CLARO}; background-color: rgba(0, 174, 239, 0.05); font-weight: 600;'>{fmt(row['S5_Real'])}</td>
 <td style='padding: 8px 10px; text-align: right; font-weight: 800; background-color: rgba(0,0,0,0.03);'>{fmt(row['Total_Modelo'])}</td>"""
 
             if es_total_row:
@@ -1653,7 +1656,7 @@ with st.sidebar:
                 filas += "</tr>"
         return filas
 
-    # Generador de filas compactas adaptado a las 11 columnas del nuevo formato
+    # Generador de filas compactas adaptado a las 13 columnas del nuevo formato
     def generar_filas_crono_html(df, es_usd=False):
         filas = ""
         prefijo = "$" if es_usd else ""
@@ -1675,6 +1678,9 @@ with st.sidebar:
                 
                 filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 11px; color: #64748B;'>{f(row['S4_Est'])}</td>"
                 filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 11px; font-weight: 600; color: #0056B3; border-right: 1px solid #E2E8F0; background: #F8FAFC;'>{f(row['S4_Real'])}</td>"
+                
+                filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 11px; color: #64748B;'>{f(row['S5_Est'])}</td>"
+                filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: center; font-size: 11px; font-weight: 600; color: #0056B3; border-right: 1px solid #E2E8F0; background: #F8FAFC;'>{f(row['S5_Real'])}</td>"
                 
                 filas += f"<td style='padding: 5px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 11px; background: #F1F5F9; color: #001F5B;'>{f(row['Total_Modelo'])}</td>"
                 filas += f"</tr>"
@@ -1831,9 +1837,12 @@ with st.sidebar:
                             <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 2</th>
                             <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 3</th>
                             <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 4</th>
-                            <th rowspan="2" style="padding: 8px; text-align: right;">Total Est.</th>
+                            <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 5</th>
+                            <th rowspan="2" style="padding: 8px; text-align: right;">Total Mod.</th>
                         </tr>
                         <tr style="background-color: #001F5B; color: #FFB81C; font-size: 10px;">
+                            <th style="padding: 4px; text-align: center;">Est.</th>
+                            <th style="padding: 4px; text-align: center; border-right: 1px solid rgba(255,255,255,0.2); color: #00AEEF;">Real</th>
                             <th style="padding: 4px; text-align: center;">Est.</th>
                             <th style="padding: 4px; text-align: center; border-right: 1px solid rgba(255,255,255,0.2); color: #00AEEF;">Real</th>
                             <th style="padding: 4px; text-align: center;">Est.</th>
@@ -1862,9 +1871,12 @@ with st.sidebar:
                             <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 2</th>
                             <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 3</th>
                             <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 4</th>
-                            <th rowspan="2" style="padding: 8px; text-align: right;">Total Est.</th>
+                            <th colspan="2" style="padding: 6px; text-align: center; border-bottom: 1px solid rgba(255,255,255,0.2); border-right: 1px solid rgba(255,255,255,0.2);">Semana 5</th>
+                            <th rowspan="2" style="padding: 8px; text-align: right;">Total Mod.</th>
                         </tr>
                         <tr style="background-color: #001F5B; color: #FFB81C; font-size: 10px;">
+                            <th style="padding: 4px; text-align: center;">Est.</th>
+                            <th style="padding: 4px; text-align: center; border-right: 1px solid rgba(255,255,255,0.2); color: #00AEEF;">Real</th>
                             <th style="padding: 4px; text-align: center;">Est.</th>
                             <th style="padding: 4px; text-align: center; border-right: 1px solid rgba(255,255,255,0.2); color: #00AEEF;">Real</th>
                             <th style="padding: 4px; text-align: center;">Est.</th>
