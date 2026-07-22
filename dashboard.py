@@ -478,6 +478,9 @@ def cargar_cobranza_aliados_bancos_real(archivo):
 val_total_aliados_bs, cxc_bancos_usd = cargar_cobranza_aliados_bancos_real(archivo_excel)
 
 
+st.markdown('<hr style="border: 1px solid #E2E8F0; margin: 30px 0 20px 0;">', unsafe_allow_html=True)
+st.markdown(f'<h3 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; margin-bottom: 20px;">Operación Semanal (Flujo de Inversión)</h3>', unsafe_allow_html=True)
+
 # ==============================================================================
 # FILA 1: TARJETAS KPI (4 COLUMNAS UNIFICADAS)
 # ==============================================================================
