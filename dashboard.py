@@ -479,7 +479,7 @@ val_total_aliados_bs, cxc_bancos_usd = cargar_cobranza_aliados_bancos_real(archi
 
 
 st.markdown('<hr style="border: 1px solid #E2E8F0; margin: 30px 0 20px 0;">', unsafe_allow_html=True)
-st.markdown(f'<h3 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; margin-bottom: 20px;">Operación Semanal (Flujo de Inversión)</h3>', unsafe_allow_html=True)
+st.markdown(f'<h3 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; margin-bottom: 20px;">Operación Semanal (Flujo Operativo)</h3>', unsafe_allow_html=True)
 
 # ==============================================================================
 # FILA 1: TARJETAS KPI (4 COLUMNAS UNIFICADAS)
@@ -900,6 +900,9 @@ def cargar_cxc_inversion_real(archivo):
 # Asignamos los valores con la nueva función
 inv_cxc_bs, inv_cxc_usd = cargar_cxc_inversion_real(archivo_excel)
 
+st.markdown('<hr style="border: 1px solid #E2E8F0; margin: 30px 0 20px 0;">', unsafe_allow_html=True)
+st.markdown(f'<h3 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; margin-bottom: 20px;">Operación Semanal (Flujo de Inversión)</h3>', unsafe_allow_html=True)
+
 col_inv1, col_inv2, col_inv3, col_inv4 = st.columns(4)
 
 with col_inv1:
@@ -938,6 +941,100 @@ with col_inv4:
     </div>
     """, unsafe_allow_html=True)
 
+
+
+# ==============================================================================
+# DETALLE DE TABLA: EQUIPOS POR PAGAR SEMANAL (COORDENADAS EXACTAS C52:G62)
+# ==============================================================================
+@st.cache_data
+def cargar_detalle_equipos(archivo):
+    try:
+        archivo.seek(0)
+        # Apuntamos exactamente a C52:G62
+        df = pd.read_excel(archivo, sheet_name='METRICAS', skiprows=51, nrows=11, usecols="C:G", header=None)
+        df.columns = ['Equipo', 'Monto_Bs', 'Monto_USD', 'Costo_Unitario', 'Cantidad']
+        
+        # Limpieza de las filas vacías por si acaso
+        df = df.dropna(how='all')
+        df = df[df['Equipo'].astype(str).str.strip() != '']
+        df = df[~df['Equipo'].astype(str).str.contains('Monto Bs', case=False, na=False)]
+        
+        # Limpiador Latino para los números
+        def limpiar_num(val):
+            if pd.isna(val) or str(val).strip() in ['#N/D', 'nan', '', 'None', '-']: return 0.0
+            if isinstance(val, (int, float)): return float(val)
+            import re
+            v = re.sub(r'[^\d\.,\-]', '', str(val))
+            if '.' in v and ',' in v: v = v.replace('.', '').replace(',', '.')
+            elif ',' in v: v = v.replace(',', '.')
+            try: return float(v)
+            except: return 0.0
+        
+        for col in ['Monto_Bs', 'Monto_USD', 'Costo_Unitario', 'Cantidad']:
+            df[col] = df[col].apply(limpiar_num)
+            
+        return df
+    except Exception as e:
+        return pd.DataFrame()
+
+df_detalle_equipos = cargar_detalle_equipos(archivo_excel)
+
+if not df_detalle_equipos.empty:
+    st.markdown('<div class="premium-card" style="padding: 20px; margin-top: 10px;">', unsafe_allow_html=True)
+    st.markdown(f'<h4 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 700; margin-top: 0; margin-bottom: 15px;">Detalle de Equipos por Pagar</h4>', unsafe_allow_html=True)
+    
+    html_tabla_eq = f"""
+    <table style='width:100%; border-collapse: collapse; font-family: "Montserrat", sans-serif; font-size: 0.85rem;'>
+        <thead>
+            <tr>
+                <th style='padding: 8px 5px; border-bottom: 2px solid {COLOR_GRIS_CLARO}; color: {COLOR_TEXTO_PRINCIPAL}; text-align: left;'>Equipo</th>
+                <th style='padding: 8px 5px; border-bottom: 2px solid {COLOR_GRIS_CLARO}; color: {COLOR_TEXTO_PRINCIPAL}; text-align: right;'>Monto Bs</th>
+                <th style='padding: 8px 5px; border-bottom: 2px solid {COLOR_GRIS_CLARO}; color: {COLOR_TEXTO_PRINCIPAL}; text-align: right;'>Monto USD</th>
+                <th style='padding: 8px 5px; border-bottom: 2px solid {COLOR_GRIS_CLARO}; color: {COLOR_TEXTO_PRINCIPAL}; text-align: right;'>Costo Unit.</th>
+                <th style='padding: 8px 5px; border-bottom: 2px solid {COLOR_GRIS_CLARO}; color: {COLOR_TEXTO_PRINCIPAL}; text-align: center;'>Cantidad</th>
+            </tr>
+        </thead>
+        <tbody>
+    """
+    
+    total_bs = 0
+    total_usd = 0
+    total_cant = 0
+    
+    for _, row in df_detalle_equipos.iterrows():
+        equipo = str(row['Equipo']).strip()
+        if equipo == 'nan' or equipo == '' or equipo.lower() == 'total': continue
+        
+        mnt_bs = row['Monto_Bs']
+        mnt_usd = row['Monto_USD']
+        costo = row['Costo_Unitario']
+        cant = row['Cantidad']
+        
+        total_bs += mnt_bs
+        total_usd += mnt_usd
+        total_cant += cant
+        
+        html_tabla_eq += f"<tr><td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; color: {COLOR_GRIS_TEXTO}; font-weight: 600;'>{equipo}</td>"
+        html_tabla_eq += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: right; color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 700;'>{format_money_ve(mnt_bs)}</td>"
+        html_tabla_eq += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: right; color: #28a745; font-weight: 700;'>${format_money_ve(mnt_usd)}</td>"
+        
+        str_costo = f"${format_money_ve(costo)}" if costo > 0 else "-"
+        str_cant = int(cant) if cant > 0 else "-"
+        
+        html_tabla_eq += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: right; color: {COLOR_GRIS_TEXTO}; font-weight: 500;'>{str_costo}</td>"
+        html_tabla_eq += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: center; color: {COLOR_CAJA_CELESTE}; font-weight: 800;'>{str_cant}</td></tr>"
+        
+    html_tabla_eq += f"""
+        <tr style="background-color: #F8FAFC;">
+            <td style='padding: 10px 5px; font-weight: 800; color: {COLOR_TEXTO_PRINCIPAL}; border-top: 2px solid {COLOR_GRIS_CLARO};'>TOTAL</td>
+            <td style='padding: 10px 5px; text-align: right; font-weight: 800; color: {COLOR_TEXTO_PRINCIPAL}; border-top: 2px solid {COLOR_GRIS_CLARO};'>{format_money_ve(total_bs)}</td>
+            <td style='padding: 10px 5px; text-align: right; font-weight: 800; color: #28a745; border-top: 2px solid {COLOR_GRIS_CLARO};'>${format_money_ve(total_usd)}</td>
+            <td style='padding: 10px 5px; text-align: right; border-top: 2px solid {COLOR_GRIS_CLARO};'></td>
+            <td style='padding: 10px 5px; text-align: center; font-weight: 800; color: {COLOR_CAJA_CELESTE}; border-top: 2px solid {COLOR_GRIS_CLARO};'>{int(total_cant)}</td>
+        </tr>
+    """
+    html_tabla_eq += "</tbody></table></div>"
+    st.markdown(html_tabla_eq, unsafe_allow_html=True)
 
 
 # ==============================================================================
