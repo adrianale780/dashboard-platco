@@ -243,7 +243,7 @@ def extraer_moneda_extranjera_directo(archivo):
         df_temp = pd.read_excel(
             archivo, 
             sheet_name='DISTRIBUCIÓN DE FONDOS', 
-            skiprows=49, 
+            skiprows=50, 
             nrows=1, 
             usecols="C", 
             header=None
