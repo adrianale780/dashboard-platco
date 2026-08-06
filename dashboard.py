@@ -1825,7 +1825,31 @@ with st.sidebar:
                 filas += "</tr>"
         return filas
 
-    # Generador de filas compactas adaptado a las 13 columnas del nuevo formato
+    # NUEVO: Generador exclusivo para Gerencia (6 columnas)
+    def generar_filas_gerencia_html(df):
+        filas = ""
+        if df is not None and not df.empty:
+            for _, row in df.iterrows():
+                mnt_bs = row['Monto']
+                mnt_usd = row['Monto_USD']
+                pct = row['Porcentaje']
+                ppto = row['Presupuesto_USD']
+                rvp = row['Real_vs_Presupuesto']
+                
+                # Colores dinámicos para el exportable
+                color_rvp = "#dc3545" if rvp < 0 else ("#28a745" if rvp > 0 else "#64748B")
+                rvp_str = f"${format_money_ve(abs(rvp))}"
+                if rvp < 0: rvp_str = f"-{rvp_str}"
+                
+                filas += f"<tr><td style='padding: 8px; border-bottom: 1px solid #E2E8F0; font-size: 13px;'>{row['Gerencia']}</td>"
+                filas += f"<td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 13px; color: #001F5B;'>{format_money_ve(mnt_bs)}</td>"
+                filas += f"<td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 13px; color: #26BE50;'>${format_money_ve(mnt_usd)}</td>"
+                filas += f"<td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 13px; color: #00AEEF;'>{pct:.1f}%</td>"
+                filas += f"<td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 13px; color: #64748B;'>${format_money_ve(ppto)}</td>"
+                filas += f"<td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 13px; color: {color_rvp};'>{rvp_str}</td></tr>"
+        return filas
+
+    # Generador de filas compactas adaptado a las columnas de Equipos
     def generar_filas_crono_html(df, es_usd=False):
         filas = ""
         prefijo = "$" if es_usd else ""
@@ -1857,7 +1881,8 @@ with st.sidebar:
     
     html_cxp = generar_filas_html(df_comp_tabla, 'Concepto', 'Monto', 'Porcentaje') if 'df_comp_tabla' in locals() else ""
     html_cxc = generar_filas_html(df_cobrar_tabla, 'Concepto', 'Monto', 'Porcentaje') if 'df_cobrar_tabla' in locals() else ""
-    html_ger = generar_filas_html(df_gerencia, 'Gerencia', 'Monto', 'Porcentaje') if 'df_gerencia' in locals() else ""
+    # CAMBIO: Usamos el generador exclusivo para Gerencia
+    html_ger = generar_filas_gerencia_html(df_gerencia) if 'df_gerencia' in locals() else ""
     html_crono_cant = generar_filas_crono_html(df_crono_cant, False) if 'df_crono_cant' in locals() else ""
     html_crono_usd = generar_filas_crono_html(df_crono_usd, True) if 'df_crono_usd' in locals() else ""
     
@@ -1988,7 +2013,15 @@ with st.sidebar:
                 <div>
                     <h2>6. Desembolso por Gerencia</h2>
                     <table>
-                        <tr><th>Gerencia</th><th style="text-align:right;">Monto (Bs)</th><th style="text-align:right;">Monto (USD)</th><th style="text-align:right;">%</th></tr>
+                        <!-- CAMBIO: Ahora tiene las 6 columnas -->
+                        <tr>
+                            <th>Gerencia</th>
+                            <th style="text-align:right;">Monto (Bs)</th>
+                            <th style="text-align:right;">Monto (USD)</th>
+                            <th style="text-align:right;">%</th>
+                            <th style="text-align:right;">Ppto USD</th>
+                            <th style="text-align:right;">Real vs Ppto</th>
+                        </tr>
                         {html_ger}
                     </table>
                 </div>
