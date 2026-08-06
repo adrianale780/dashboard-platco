@@ -1432,16 +1432,20 @@ st.markdown(f'<h3 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; margi
 def cargar_desembolsos_gerencia(archivo):
     try:
         archivo.seek(0)
-        # Leemos desde la columna C hasta la K, saltando hasta la fila 103 (skiprows=102)
+        # Leemos desde la columna C hasta la K
         df = pd.read_excel(archivo, sheet_name='METRICAS', skiprows=102, nrows=20, usecols="C:K", header=None)
         
-        # Le damos nombre a las 9 columnas (incluyendo las de la tabla dinámica vieja que vamos a ignorar)
+        # Nombramos las 9 columnas temporales
         df.columns = ['ColC', 'ColD', 'ColE', 'Gerencia', 'Monto', 'Monto_USD', 'Porcentaje', 'Presupuesto_USD', 'Real_vs_Presupuesto']
         
-        # Nos quedamos estrictamente con el cuadro limpio de la derecha (Columnas F a K)
+        # FILTRO CAZADOR DE TOTALES: Eliminamos la fila tramposa del total leyendo las columnas ocultas y si la Gerencia es un número
+        df = df[~df['ColC'].astype(str).str.contains('Total general', case=False, na=False)]
+        df = df[~df['ColE'].astype(str).str.contains('TOTAL', case=False, na=False)]
+        df = df[~df['Gerencia'].astype(str).str.match(r'^\d+\.?\d*$')] # Si el nombre es puro número, se va.
+        
+        # Nos quedamos solo con las 6 columnas importantes
         df = df[['Gerencia', 'Monto', 'Monto_USD', 'Porcentaje', 'Presupuesto_USD', 'Real_vs_Presupuesto']].copy()
         
-        # Limpieza de títulos y filas vacías
         df = df.dropna(subset=['Gerencia'])
         palabras_basura = ['Gerencia', 'Total general', 'TOTAL', 'Etiquetas de fila']
         df = df[~df['Gerencia'].astype(str).str.strip().isin(palabras_basura)]
@@ -1456,7 +1460,6 @@ def cargar_desembolsos_gerencia(archivo):
             try: return float(v)
             except: return 0.0
             
-        # El Real vs Ppto puede ser negativo, así que no le ponemos valor absoluto (.abs)
         def purificar_con_signo(val):
             if pd.isna(val) or str(val).strip() in ['#N/D', 'nan', '', '-', 'None']: return 0.0
             if isinstance(val, (int, float)): return float(val)
@@ -1480,14 +1483,12 @@ def cargar_desembolsos_gerencia(archivo):
             try: return float(v_str)
             except: return 0.0
 
-        # Aplicamos las limpiezas
         df['Monto'] = df['Monto'].apply(purificar_num).abs()
         df['Monto_USD'] = df['Monto_USD'].apply(purificar_num).abs()
         df['Porcentaje'] = df['Porcentaje'].apply(limpiar_pct)
         df['Presupuesto_USD'] = df['Presupuesto_USD'].apply(purificar_num).abs()
         df['Real_vs_Presupuesto'] = df['Real_vs_Presupuesto'].apply(purificar_con_signo)
 
-        # Filtramos y ordenamos de mayor a menor gasto
         df = df[(df['Monto'] > 0) & (df['Gerencia'].astype(str).str.strip() != '')].reset_index(drop=True)
         total_real_bs = df['Monto'].sum()
         df = df.sort_values(by='Monto', ascending=False).reset_index(drop=True)
@@ -1496,17 +1497,14 @@ def cargar_desembolsos_gerencia(archivo):
     except Exception:
         return pd.DataFrame(), 0.0
 
-# Llamamos a la función
 df_gerencia, total_desembolso = cargar_desembolsos_gerencia(archivo_excel)
 
 if not df_gerencia.empty:
-    # Ajusté levemente las proporciones [1.7, 2.3] para que la tabla ancha quepa perfecto al lado del gráfico
     col_ger_tabla, col_ger_grafico = st.columns([1.7, 2.3])
     with col_ger_tabla:
         st.markdown('<div class="premium-card" style="padding: 20px; margin-bottom: 20px; overflow-x: auto;">', unsafe_allow_html=True)
         st.markdown(f'<h4 style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 700; margin-top: 0; margin-bottom: 15px;">Detalle de Distribución</h4>', unsafe_allow_html=True)
         
-        # Armado de la nueva tabla HTML con las 6 columnas
         html_tabla_ger = f"""
         <table style='width:100%; border-collapse: collapse; font-family: "Montserrat", sans-serif; font-size: 0.78rem;'>
             <thead>
@@ -1521,17 +1519,28 @@ if not df_gerencia.empty:
             </thead>
             <tbody>
         """
+        
+        # Variables para calcular el total
+        sum_bs = 0
+        sum_usd = 0
+        sum_ppto = 0
+        sum_rvp = 0
+        
         for _, row in df_gerencia.iterrows():
+            sum_bs += row['Monto']
+            sum_usd += row['Monto_USD']
+            sum_ppto += row['Presupuesto_USD']
+            sum_rvp += row['Real_vs_Presupuesto']
+            
             mnt_bs = format_money_ve(row['Monto'])
             mnt_usd = f"${format_money_ve(row['Monto_USD'])}"
             pct = f"{row['Porcentaje']:.1f}%"
             ppto = f"${format_money_ve(row['Presupuesto_USD'])}"
             
-            # Lógica inteligente de colores: Rojo si falta plata (negativo), Verde si sobró, Gris si quedó en 0.
             rvp = row['Real_vs_Presupuesto']
             color_rvp = "#dc3545" if rvp < 0 else ("#28a745" if rvp > 0 else "#64748B")
             rvp_str = f"${format_money_ve(abs(rvp))}"
-            if rvp < 0: rvp_str = f"-{rvp_str}" # Le devolvemos el signo menos visualmente
+            if rvp < 0: rvp_str = f"-{rvp_str}"
             
             html_tabla_ger += f"<tr><td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; color: {COLOR_GRIS_TEXTO}; font-weight: 600;'>{str(row['Gerencia']).strip()}</td>"
             html_tabla_ger += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: right; color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 700;'>{mnt_bs}</td>"
@@ -1539,6 +1548,22 @@ if not df_gerencia.empty:
             html_tabla_ger += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: right; color: {COLOR_CAJA_CELESTE}; font-weight: 800;'>{pct}</td>"
             html_tabla_ger += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: right; color: #64748B; font-weight: 600;'>{ppto}</td>"
             html_tabla_ger += f"<td style='padding: 8px 5px; border-bottom: 1px solid {COLOR_GRIS_CLARO}; text-align: right; color: {color_rvp}; font-weight: 700;'>{rvp_str}</td></tr>"
+        
+        # --- NUEVA FILA DE TOTALES DINÁMICA ---
+        color_tot_rvp = "#dc3545" if sum_rvp < 0 else ("#28a745" if sum_rvp > 0 else "#64748B")
+        tot_rvp_str = f"${format_money_ve(abs(sum_rvp))}"
+        if sum_rvp < 0: tot_rvp_str = f"-{tot_rvp_str}"
+        
+        html_tabla_ger += f"""
+        <tr style="background-color: #F8FAFC;">
+            <td style='padding: 10px 5px; font-weight: 800; color: {COLOR_TEXTO_PRINCIPAL}; border-top: 2px solid {COLOR_GRIS_CLARO};'>TOTAL</td>
+            <td style='padding: 10px 5px; text-align: right; font-weight: 800; color: {COLOR_TEXTO_PRINCIPAL}; border-top: 2px solid {COLOR_GRIS_CLARO};'>{format_money_ve(sum_bs)}</td>
+            <td style='padding: 10px 5px; text-align: right; font-weight: 800; color: #26BE50; border-top: 2px solid {COLOR_GRIS_CLARO};'>${format_money_ve(sum_usd)}</td>
+            <td style='padding: 10px 5px; text-align: right; font-weight: 800; color: {COLOR_CAJA_CELESTE}; border-top: 2px solid {COLOR_GRIS_CLARO};'>100.0%</td>
+            <td style='padding: 10px 5px; text-align: right; font-weight: 800; color: #64748B; border-top: 2px solid {COLOR_GRIS_CLARO};'>${format_money_ve(sum_ppto)}</td>
+            <td style='padding: 10px 5px; text-align: right; font-weight: 800; color: {color_tot_rvp}; border-top: 2px solid {COLOR_GRIS_CLARO};'>{tot_rvp_str}</td>
+        </tr>
+        """
         
         html_tabla_ger += "</tbody></table></div>"
         st.markdown(html_tabla_ger, unsafe_allow_html=True)
@@ -1548,14 +1573,12 @@ if not df_gerencia.empty:
             <div style="color: {COLOR_TEXTO_PRINCIPAL}; font-weight: 800; font-size: 0.85rem; text-transform: uppercase; margin-bottom: 5px;">🎯 Insight de Gestión</div>
             <div style="color: {COLOR_GRIS_TEXTO}; font-size: 0.85rem; line-height: 1.5;">
                 La gerencia de <b>{df_gerencia.iloc[0]['Gerencia']}</b> concentra el <b>{df_gerencia.iloc[0]['Porcentaje']:.1f}%</b> del desembolso total del mes ({format_money_ve(total_desembolso)} Bs). 
-                Se sugiere revisar sus partidas principales para identificar oportunidades de eficiencia.
             </div>
         </div>
         """, unsafe_allow_html=True)
 
     with col_ger_grafico:
         st.markdown('<div class="premium-card" style="height: 100%; padding: 20px; display: flex; align-items: center; justify-content: center;">', unsafe_allow_html=True)
-        # El gráfico sigue utilizando "Monto" (Bs) como antes para mantener todo intacto
         fig_ger = px.pie(df_gerencia, names='Gerencia', values='Monto', hole=0.65, color_discrete_sequence=[COLOR_TEXTO_PRINCIPAL, COLOR_CAJA_CELESTE, COLOR_AMARILLO, "#64748B", "#94A3B8", "#CBD5E1"])
         fig_ger.update_traces(textposition='outside', textinfo='percent+label', textfont=dict(family="Montserrat", size=10, color=COLOR_TEXTO_PRINCIPAL), hovertemplate="<b>%{label}</b><br>Monto: %{value:,.2f} Bs<br>Participación: %{percent}<extra></extra>")
         
@@ -1825,18 +1848,27 @@ with st.sidebar:
                 filas += "</tr>"
         return filas
 
-    # NUEVO: Generador exclusivo para Gerencia (6 columnas)
+    # NUEVO: Generador exclusivo para Gerencia (6 columnas) CON TOTALES AL FINAL
     def generar_filas_gerencia_html(df):
         filas = ""
+        sum_bs = 0
+        sum_usd = 0
+        sum_ppto = 0
+        sum_rvp = 0
+        
         if df is not None and not df.empty:
             for _, row in df.iterrows():
+                sum_bs += row['Monto']
+                sum_usd += row['Monto_USD']
+                sum_ppto += row['Presupuesto_USD']
+                sum_rvp += row['Real_vs_Presupuesto']
+                
                 mnt_bs = row['Monto']
                 mnt_usd = row['Monto_USD']
                 pct = row['Porcentaje']
                 ppto = row['Presupuesto_USD']
                 rvp = row['Real_vs_Presupuesto']
                 
-                # Colores dinámicos para el exportable
                 color_rvp = "#dc3545" if rvp < 0 else ("#28a745" if rvp > 0 else "#64748B")
                 rvp_str = f"${format_money_ve(abs(rvp))}"
                 if rvp < 0: rvp_str = f"-{rvp_str}"
@@ -1847,6 +1879,22 @@ with st.sidebar:
                 filas += f"<td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 13px; color: #00AEEF;'>{pct:.1f}%</td>"
                 filas += f"<td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 13px; color: #64748B;'>${format_money_ve(ppto)}</td>"
                 filas += f"<td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: bold; font-size: 13px; color: {color_rvp};'>{rvp_str}</td></tr>"
+                
+            # Agregamos la fila de TOTAL al final del ciclo
+            color_tot_rvp = "#dc3545" if sum_rvp < 0 else ("#28a745" if sum_rvp > 0 else "#64748B")
+            tot_rvp_str = f"${format_money_ve(abs(sum_rvp))}"
+            if sum_rvp < 0: tot_rvp_str = f"-{tot_rvp_str}"
+            
+            filas += f"""
+            <tr style="background-color: #F1F5F9;">
+                <td style='padding: 8px; border-bottom: 1px solid #E2E8F0; font-weight: 800; color: #001F5B;'>TOTAL</td>
+                <td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: 800; color: #001F5B;'>{format_money_ve(sum_bs)}</td>
+                <td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: 800; color: #26BE50;'>${format_money_ve(sum_usd)}</td>
+                <td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: 800; color: #00AEEF;'>100.0%</td>
+                <td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: 800; color: #64748B;'>${format_money_ve(sum_ppto)}</td>
+                <td style='padding: 8px; border-bottom: 1px solid #E2E8F0; text-align: right; font-weight: 800; color: {color_tot_rvp};'>{tot_rvp_str}</td>
+            </tr>
+            """
         return filas
 
     # Generador de filas compactas adaptado a las columnas de Equipos
