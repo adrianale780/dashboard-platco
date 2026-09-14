@@ -199,9 +199,10 @@ def cargar_flash_report(archivo):
             return df[df['Concepto'].astype(str).str.contains(texto, case=False, na=False)][col].sum()
 
         return (
+            # --- Montos en Bs ---
             buscar('Bancario Operativo', 'Bs'),
             buscar('Compromisos CxP', 'Bs'),
-            buscar('Apartados para Compromisos Operativo', 'Bs'), # Ignoramos la palabra "abril"
+            buscar('Apartados para Compromisos Operativo', 'Bs'),
             buscar('Aliados-Continuidad', 'Bs'),
             buscar('Operativo Disponible a final de semana', 'Bs'),
             buscar('Saldo disponible proyectado', 'Bs'),
@@ -213,24 +214,38 @@ def cargar_flash_report(archivo):
             buscar('Inversion Disponible a Hoy', 'Bs'),
             buscar('Inversion proyectado a cierre', 'Bs'),
             
+            # --- Montos Especiales ---
             buscar('Moneda Extranjera', 'USD'),
             buscar('Boveda', 'USD'),
             
-            # --- NUEVO: Extraemos los valores en USD (Columna E) para las 4 cajitas ---
+            # --- Montos en USD de las Cajitas Celestes ---
             buscar('Operativo Disponible a final de semana', 'USD'),
             buscar('Saldo disponible proyectado', 'USD'),
             buscar('Inversion Disponible a Hoy', 'USD'),
-            buscar('Inversion proyectado a cierre', 'USD')
+            buscar('Inversion proyectado a cierre', 'USD'),
+            
+            # --- NUEVO: Montos en USD de las 8 variables principales ---
+            buscar('Bancario Operativo', 'USD'),
+            buscar('Compromisos CxP', 'USD'),
+            buscar('Apartados para Compromisos Operativo', 'USD'),
+            buscar('Aliados-Continuidad', 'USD'),
+            
+            buscar('Bancario Inversion', 'USD'),
+            buscar('Equipos Por Pagar', 'USD'),
+            buscar('Apartados para compromisos Fiscales', 'USD'),
+            buscar('Servicio Especializado', 'USD')
         )
     except Exception as e:
         st.error(f"Error procesando Resumen Consolidado: {e}")
-        return (0,)*18 # Retorna 18 ceros si el Excel está corrupto para no romper la app
+        return (0.0,) * 26 # Retorna 26 ceros en caso de error para que no colapse
 
-# Asignamos los valores extraídos a las variables del diseño (incluyendo las 4 nuevas en USD)
+# Asignamos los 26 valores extraídos a las variables del diseño
 (val_op_banco, val_op_cxp, val_op_apartado, val_op_cxc, val_op_disp_hoy, val_op_proyectado,
  val_inv_banco, val_inv_equipos, val_inv_apartado, val_inv_cxc, val_inv_disp_hoy, val_inv_proyectado,
  val_div_ext, val_div_boveda,
- val_op_disp_hoy_usd, val_op_proyectado_usd, val_inv_disp_hoy_usd, val_inv_proyectado_usd) = cargar_flash_report(archivo_excel)
+ val_op_disp_hoy_usd, val_op_proyectado_usd, val_inv_disp_hoy_usd, val_inv_proyectado_usd,
+ val_op_banco_usd, val_op_cxp_usd, val_op_apartado_usd, val_op_cxc_usd,
+ val_inv_banco_usd, val_inv_equipos_usd, val_inv_apartado_usd, val_inv_cxc_usd) = cargar_flash_report(archivo_excel)
 
 # ---> EXTRACCIÓN DIRECTA DESDE LA FUENTE (Pestaña: DISTRIBUCIÓN DE FONDOS, Celda: C50) <---
 @st.cache_data
@@ -319,6 +334,7 @@ html_resumen = f"""<style>
 .resumen-item:last-child {{ border-right: none; padding-right: 0; }}
 .resumen-label {{ font-size: 0.75rem; color: #E2E8F0; text-transform: uppercase; margin-bottom: 3px; font-weight: 500; }}
 .resumen-valor {{ font-size: 1.1rem; font-weight: 800; }}
+.resumen-valor-usd {{ font-size: 0.85rem; color: #00AEEF; font-weight: 600; margin-top: 2px; }}
 .caja-celeste {{ background-color: {COLOR_CAJA_CELESTE}; padding: 8px 15px; border-radius: 6px; text-align: center; color: white; min-width: 150px; display: flex; flex-direction: column; justify-content: center; }}
 .caja-celeste-bs {{ font-weight: 800; font-size: 1.1rem; margin-bottom: 2px; }}
 .caja-celeste-usd {{ font-weight: 600; font-size: 0.85rem; color: #E2E8F0; }}
@@ -326,10 +342,10 @@ html_resumen = f"""<style>
 </style>
 
 <div class="resumen-row">
-<div class="resumen-item"><span class="resumen-label">Saldo Bancario Operativo</span><span class="resumen-valor">{format_money_ve(val_op_banco)}</span></div>
-<div class="resumen-item"><span class="resumen-label">Compromisos de CxP</span><span class="resumen-valor">{format_money_ve(val_op_cxp)}</span></div>
-<div class="resumen-item"><span class="resumen-label">Apartados Proveedores e Impuestos</span><span class="resumen-valor">{format_money_ve(val_op_apartado)}</span></div>
-<div class="resumen-item" style="border-right: none;"><span class="resumen-label">Cuentas por Cobrar</span><span class="resumen-valor">{format_money_ve(val_op_cxc)}</span></div>
+<div class="resumen-item"><span class="resumen-label">Saldo Bancario Operativo</span><span class="resumen-valor">{format_money_ve(val_op_banco)}</span><span class="resumen-valor-usd">${format_money_ve(val_op_banco_usd)}</span></div>
+<div class="resumen-item"><span class="resumen-label">Compromisos de CxP</span><span class="resumen-valor">{format_money_ve(val_op_cxp)}</span><span class="resumen-valor-usd">${format_money_ve(val_op_cxp_usd)}</span></div>
+<div class="resumen-item"><span class="resumen-label">Apartados Proveedores e Impuestos</span><span class="resumen-valor">{format_money_ve(val_op_apartado)}</span><span class="resumen-valor-usd">${format_money_ve(val_op_apartado_usd)}</span></div>
+<div class="resumen-item" style="border-right: none;"><span class="resumen-label">Cuentas por Cobrar</span><span class="resumen-valor">{format_money_ve(val_op_cxc)}</span><span class="resumen-valor-usd">${format_money_ve(val_op_cxc_usd)}</span></div>
 <div style="display: flex; gap: 10px; margin-left: 20px;">
 <div style="display: flex; flex-direction: column; gap: 5px;">
     <div class="caja-celeste">
@@ -349,10 +365,10 @@ html_resumen = f"""<style>
 </div>
 
 <div class="resumen-row">
-<div class="resumen-item"><span class="resumen-label">Saldo Bancario Inversión</span><span class="resumen-valor">{format_money_ve(val_inv_banco)}</span></div>
-<div class="resumen-item"><span class="resumen-label">Equipos por Pagar</span><span class="resumen-valor">{format_money_ve(val_inv_equipos)}</span></div>
-<div class="resumen-item"><span class="resumen-label">Apartados Fiscales</span><span class="resumen-valor">{format_money_ve(val_inv_apartado)}</span></div>
-<div class="resumen-item" style="border-right: none;"><span class="resumen-label">Universo CxC Especializado</span><span class="resumen-valor">{format_money_ve(val_inv_cxc)}</span></div>
+<div class="resumen-item"><span class="resumen-label">Saldo Bancario Inversión</span><span class="resumen-valor">{format_money_ve(val_inv_banco)}</span><span class="resumen-valor-usd">${format_money_ve(val_inv_banco_usd)}</span></div>
+<div class="resumen-item"><span class="resumen-label">Equipos por Pagar</span><span class="resumen-valor">{format_money_ve(val_inv_equipos)}</span><span class="resumen-valor-usd">${format_money_ve(val_inv_equipos_usd)}</span></div>
+<div class="resumen-item"><span class="resumen-label">Apartados Fiscales</span><span class="resumen-valor">{format_money_ve(val_inv_apartado)}</span><span class="resumen-valor-usd">${format_money_ve(val_inv_apartado_usd)}</span></div>
+<div class="resumen-item" style="border-right: none;"><span class="resumen-label">Universo CxC Especializado</span><span class="resumen-valor">{format_money_ve(val_inv_cxc)}</span><span class="resumen-valor-usd">${format_money_ve(val_inv_cxc_usd)}</span></div>
 <div style="display: flex; gap: 10px; margin-left: 20px;">
 <div style="display: flex; flex-direction: column; gap: 5px;">
     <div class="caja-celeste">
