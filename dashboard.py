@@ -209,7 +209,7 @@ def cargar_flash_report(archivo):
             
             buscar('Bancario Inversion', 'Bs'),
             buscar('Equipos Por Pagar', 'Bs'),
-            buscar('Apartados fiscales', 'Bs')
+            buscar('Apartados fiscales', 'Bs'),
             buscar('Servicio Especializado', 'Bs'),
             buscar('Inversion Disponible a Hoy', 'Bs'),
             buscar('Inversion proyectado a cierre', 'Bs'),
