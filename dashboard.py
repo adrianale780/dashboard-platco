@@ -209,7 +209,7 @@ def cargar_flash_report(archivo):
             
             buscar('Bancario Inversion', 'Bs'),
             buscar('Equipos Por Pagar', 'Bs'),
-            buscar('Apartados para compromisos Fiscales', 'Bs'),
+            buscar('Apartados fiscales', 'Bs')
             buscar('Servicio Especializado', 'Bs'),
             buscar('Inversion Disponible a Hoy', 'Bs'),
             buscar('Inversion proyectado a cierre', 'Bs'),
@@ -232,7 +232,7 @@ def cargar_flash_report(archivo):
             
             buscar('Bancario Inversion', 'USD'),
             buscar('Equipos Por Pagar', 'USD'),
-            buscar('Apartados para compromisos Fiscales', 'USD'),
+            buscar('Apartados fiscales', 'USD')
             buscar('Servicio Especializado', 'USD')
         )
     except Exception as e:
@@ -829,8 +829,8 @@ inv_banco_usd = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains
 
 
 
-inv_fiscales_bs = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Apartados para compromisos Fiscales', case=False, na=False)]['Bs'].sum()
-inv_fiscales_usd = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Apartados para compromisos Fiscales', case=False, na=False)]['USD'].sum()
+inv_fiscales_bs = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Apartados fiscales', case=False, na=False)]['Bs'].sum()
+inv_fiscales_usd = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Apartados fiscales', case=False, na=False)]['USD'].sum()
 
 @st.cache_data
 def cargar_equipos_pagar_semanal(archivo):
