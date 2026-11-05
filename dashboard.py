@@ -232,7 +232,7 @@ def cargar_flash_report(archivo):
             
             buscar('Bancario Inversion', 'USD'),
             buscar('Equipos Por Pagar', 'USD'),
-            buscar('Apartados fiscales', 'USD')
+            buscar('Apartados fiscales', 'USD'),
             buscar('Servicio Especializado', 'USD')
         )
     except Exception as e:
