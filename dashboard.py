@@ -829,8 +829,39 @@ inv_banco_usd = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains
 
 
 
-inv_fiscales_bs = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Apartados fiscales', case=False, na=False)]['Bs'].sum()
-inv_fiscales_usd = df_saldos_raw[df_saldos_raw['CONCEPTO'].astype(str).str.contains('Apartados fiscales', case=False, na=False)]['USD'].sum()
+# NUEVO: Extracción independiente para el KPI de Compromisos Fiscales (Flujo de Inversión) leyendo de F:H
+@st.cache_data
+def cargar_apartado_semanal_inversion(archivo):
+    try:
+        archivo.seek(0)
+        # Leemos las columnas F, G y H en las primeras 30 filas para atrapar el cuadro
+        df = pd.read_excel(archivo, sheet_name='METRICAS', nrows=30, usecols="F:H", header=None)
+        df.columns = ['Concepto', 'Bs', 'USD']
+        
+        # Buscamos la celda que dice "Apartado Semanal"
+        idx = df[df['Concepto'].astype(str).str.contains('Apartado Semanal', case=False, na=False)].index
+        
+        if len(idx) > 0:
+            val_bs = df.loc[idx[0], 'Bs']
+            val_usd = df.loc[idx[0], 'USD']
+            
+            # Limpiador de formato latino
+            def limpiar_latino(val):
+                if pd.isna(val) or str(val).strip() in ['#N/D', 'nan', '', 'None']: return 0.0
+                if isinstance(val, (int, float)): return float(val)
+                import re
+                v = re.sub(r'[^\d\.,\-]', '', str(val))
+                if '.' in v and ',' in v: v = v.replace('.', '').replace(',', '.')
+                elif ',' in v: v = v.replace(',', '.')
+                try: return float(v)
+                except: return 0.0
+                
+            return abs(limpiar_latino(val_bs)), abs(limpiar_latino(val_usd))
+    except Exception:
+        pass
+    return 0.0, 0.0
+
+inv_fiscales_bs, inv_fiscales_usd = cargar_apartado_semanal_inversion(archivo_excel)
 
 @st.cache_data
 def cargar_equipos_pagar_semanal(archivo):
